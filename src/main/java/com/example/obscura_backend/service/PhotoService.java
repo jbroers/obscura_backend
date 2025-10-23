@@ -30,14 +30,24 @@ public class PhotoService {
 
     @PostConstruct
     public void init() {
+        if (uploadDirPath == null || uploadDirPath.isBlank()) {
+            throw new IllegalStateException("Upload directory path is not set");
+        }
+
         uploadDir = Paths.get(uploadDirPath);
+
         try {
             Files.createDirectories(uploadDir);
         } catch (IOException e) {
             logger.error("Could not create upload dir: {}", uploadDir, e);
             throw new RuntimeException(e);
         }
+
         logger.info("Upload directory resolved to: {}", uploadDir.toAbsolutePath());
+    }
+
+    public void setUploadDirPath(String path) {
+        this.uploadDirPath = path;
     }
 
     public void savePhoto(MultipartFile file) throws IOException {
@@ -69,12 +79,14 @@ public class PhotoService {
         if (image == null) {
             throw new IllegalArgumentException("Unable to read image");
         }
+
         ByteArrayOutputStream baos = new ByteArrayOutputStream();
         Thumbnails.of(image)
                 .scale(1.0)
                 .outputFormat("jpg")
                 .outputQuality(0.5)
                 .toOutputStream(baos);
+
         return baos.toByteArray();
     }
 
