@@ -24,7 +24,7 @@ jobs:
           distribution: temurin
 
       - name: Grant execute permission for Gradle wrapper
-        run: chmod +x obscura_backend/gradlew
+        run: chmod +x ./gradlew
 
       - name: Build and test backend
         working-directory: obscura_backend
