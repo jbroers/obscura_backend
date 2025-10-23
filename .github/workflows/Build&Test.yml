@@ -1,0 +1,38 @@
+name: Test Project
+
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - main
+
+jobs:
+  test:
+    name: Build & Test Backend
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v3
+        with:
+          java-version: 17
+          distribution: temurin
+
+      - name: Grant execute permission for Gradle wrapper
+        run: chmod +x obscura_backend/gradlew
+
+      - name: Build and test backend
+        working-directory: obscura_backend
+        run: ./gradlew clean build --no-daemon
+
+      - name: Upload build artifacts
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-build
+          path: obscura_backend/build/libs/
