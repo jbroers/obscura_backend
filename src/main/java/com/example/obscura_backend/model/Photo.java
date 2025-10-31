@@ -1,11 +1,21 @@
 package com.example.obscura_backend.model;
 
 import jakarta.persistence.*;
+import lombok.AllArgsConstructor;
+import lombok.Builder;
+import lombok.Data;
+import lombok.NoArgsConstructor;
+
 import java.time.LocalDateTime;
 
 @Entity
 @Table(name = "photos")
+@Data
+@Builder
+@NoArgsConstructor
+@AllArgsConstructor
 public class Photo {
+
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
@@ -15,30 +25,25 @@ public class Photo {
     private String contentType;
     private Long fileSize;
     private LocalDateTime uploadedAt;
+    private Boolean isRaw;
 
-    @Column(columnDefinition = "TEXT")
+    @Column(length = 10000)
     private String metadata;
 
-    public Photo() {}
+    private String cameraMake;
+    private String cameraModel;
+    private String lensModel;
+    private Integer iso;
+    private String aperture;
+    private String shutterSpeed;
+    private String focalLength;
+    private String exposureCompensation;
+    private String whiteBalance;
+    private String meteringMode;
+    private String flashMode;
 
-    public Long getId() { return id; }
-    public void setId(Long id) { this.id = id; }
-
-    public String getFileName() { return fileName; }
-    public void setFileName(String fileName) { this.fileName = fileName; }
-
-    public String getFilePath() { return filePath; }
-    public void setFilePath(String filePath) { this.filePath = filePath; }
-
-    public String getContentType() { return contentType; }
-    public void setContentType(String contentType) { this.contentType = contentType; }
-
-    public Long getFileSize() { return fileSize; }
-    public void setFileSize(Long fileSize) { this.fileSize = fileSize; }
-
-    public LocalDateTime getUploadedAt() { return uploadedAt; }
-    public void setUploadedAt(LocalDateTime uploadedAt) { this.uploadedAt = uploadedAt; }
-
-    public String getMetadata() { return metadata; }
-    public void setMetadata(String metadata) { this.metadata = metadata; }
+    private Integer width;
+    private Integer height;
+    private LocalDateTime dateTaken;
+    private String orientation;
 }
