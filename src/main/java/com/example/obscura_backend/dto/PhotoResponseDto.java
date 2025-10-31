@@ -6,6 +6,7 @@ public class PhotoResponseDto {
     private String contentType;
     private Long fileSize;
     private String uploadedAt;
+    private Boolean isRaw;
     private String metadata;
 
     public PhotoResponseDto() {}
@@ -25,7 +26,9 @@ public class PhotoResponseDto {
     public String getUploadedAt() { return uploadedAt; }
     public void setUploadedAt(String uploadedAt) { this.uploadedAt = uploadedAt; }
 
+    public Boolean getIsRaw() { return isRaw; }
+    public void setIsRaw(Boolean isRaw) { this.isRaw = isRaw; }
+
     public String getMetadata() { return metadata; }
     public void setMetadata(String metadata) { this.metadata = metadata; }
 }
-

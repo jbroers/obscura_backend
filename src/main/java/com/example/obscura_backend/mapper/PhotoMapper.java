@@ -18,6 +18,7 @@ public class PhotoMapper {
         dto.setContentType(photo.getContentType());
         dto.setFileSize(photo.getFileSize());
         dto.setUploadedAt(photo.getUploadedAt().format(formatter));
+        dto.setIsRaw(photo.getIsRaw());
         dto.setMetadata(photo.getMetadata());
         return dto;
     }
