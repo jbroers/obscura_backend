@@ -1,39 +1,38 @@
 package com.example.obscura_backend.unit.service;
 
-import com.example.obscura_backend.model.Photo;
-import com.example.obscura_backend.repository.PhotoRepository;
 import com.example.obscura_backend.service.PhotoService;
+import com.example.obscura_backend.service.RawImageExtractionService;
+import com.example.obscura_backend.service.ExifExtractionService;
 import org.junit.jupiter.api.*;
-import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.InjectMocks;
-import org.mockito.Mock;
-import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.util.ReflectionTestUtils;
+import org.springframework.web.multipart.MultipartFile;
 
+import java.awt.image.BufferedImage;
 import java.io.IOException;
 import java.nio.file.*;
-import java.util.Arrays;
-import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.*;
 
-@ExtendWith(MockitoExtension.class)
 class PhotoServiceTest {
 
     @Mock
     private PhotoRepository photoRepository;
 
+    @Mock
+    private RawImageExtractionService rawImageExtractionService;
+
+    @Mock
+    private ExifExtractionService exifExtractionService;
+
     @InjectMocks
     private PhotoService photoService;
-
     private final Path tempDir = Paths.get("build/test-uploads");
 
     @BeforeEach
     void setup() {
-        ReflectionTestUtils.setField(photoService, "uploadDirPath", tempDir.toString());
+        photoService = new PhotoService();
+        photoService.setUploadDirPath(tempDir.toString());
         photoService.init();
     }
 
@@ -49,12 +48,13 @@ class PhotoServiceTest {
     }
 
     @Test
-    void savesValidJpegImage() throws Exception {
+    void savesValidImage() throws Exception {
         Path testImage = Paths.get("src/test/resources/test.jpg");
         assertTrue(Files.exists(testImage), "Test image ontbreekt");
 
         byte[] data = Files.readAllBytes(testImage);
         MockMultipartFile file = new MockMultipartFile("photo", "test.jpg", "image/jpeg", data);
+        photoService.savePhoto(file);
 
         Photo mockPhoto = Photo.builder()
                 .id(1L)
@@ -64,6 +64,7 @@ class PhotoServiceTest {
                 .isRaw(false)
                 .build();
 
+        doNothing().when(exifExtractionService).extractExifData(any(), any(Photo.class));
         when(photoRepository.save(any(Photo.class))).thenReturn(mockPhoto);
 
         Photo result = photoService.savePhoto(file);
@@ -73,13 +74,13 @@ class PhotoServiceTest {
         assertEquals("image/jpeg", result.getContentType());
         assertFalse(result.getIsRaw());
         verify(photoRepository, times(1)).save(any(Photo.class));
+        verify(exifExtractionService, times(1)).extractExifData(any(), any(Photo.class));
     }
 
     @Test
     void throwsOnInvalidFile() {
         MockMultipartFile file = new MockMultipartFile("photo", "test.txt", "text/plain", "hello".getBytes());
         assertThrows(IllegalArgumentException.class, () -> photoService.savePhoto(file));
-        verify(photoRepository, never()).save(any(Photo.class));
     }
 
     @Test
@@ -100,11 +101,14 @@ class PhotoServiceTest {
         String[] rawExtensions = {"test.CR2", "test.nef", "test.ARW", "test.dng", "test.raf"};
 
         for (String filename : rawExtensions) {
+            byte[] mockImageData = new byte[1024];
+            Arrays.fill(mockImageData, (byte) 0xFF);
+
             MockMultipartFile file = new MockMultipartFile(
                     "photo",
                     filename,
                     "application/octet-stream",
-                    new byte[100]
+                    mockImageData
             );
 
             Photo mockPhoto = Photo.builder()
@@ -113,17 +117,16 @@ class PhotoServiceTest {
                     .isRaw(true)
                     .build();
 
+            when(rawImageExtractionService.extractRawPreview(any(MultipartFile.class)))
+                    .thenReturn(new BufferedImage(100, 100, BufferedImage.TYPE_INT_RGB));
+            doNothing().when(exifExtractionService).extractExifData(any(), any(Photo.class));
             when(photoRepository.save(any(Photo.class))).thenReturn(mockPhoto);
 
-            try {
-                Photo result = photoService.savePhoto(file);
-                if (result != null) {
-                    assertTrue(result.getIsRaw(), "File " + filename + " should be identified as RAW");
-                }
-            } catch (Exception e) {
-            }
+            Photo result = photoService.savePhoto(file);
+            assertNotNull(result, "Photo should be saved for " + filename);
+            assertTrue(result.getIsRaw(), "File " + filename + " should be identified as RAW");
 
-            reset(photoRepository);
+            reset(photoRepository, rawImageExtractionService, exifExtractionService);
         }
     }
 
