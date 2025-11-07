@@ -1,0 +1,273 @@
+@startuml Photo Upload Flow
+!theme plain
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+skinparam BoxPadding 10
+
+title Photo Upload Processing Flow
+
+actor User
+participant "Frontend" as FE
+participant "PhotoController" as PC
+participant "PhotoService" as PS
+participant "RawImageExtractionService" as RIES
+participant "ExifExtractionService" as EES
+participant "Thumbnailator" as TN
+database "PhotoRepository" as PR
+database "File System" as FS
+
+== Photo Upload Request ==
+User -> FE: Select and upload photo
+FE -> PC: POST /photos/upload\n(MultipartFile)
+
+activate PC
+PC -> PC: Log request details\n(content-type, size, params)
+
+alt No file in request
+    PC -> PC: Check alternative\nparam names\n(photo, image)
+    alt Still no file found
+        PC --> FE: 400 Bad Request\n{"error": "No file provided"}
+        FE --> User: Error: No file selected
+        deactivate PC
+        return
+    end
+end
+
+alt File is empty
+    PC --> FE: 400 Bad Request\n{"error": "File is empty"}
+    FE --> User: Error: Empty file
+    deactivate PC
+    return
+end
+
+PC -> PS: savePhoto(file)
+activate PS
+
+== Validation ==
+PS -> PS: Check if file is null/empty
+alt File is null or empty
+    PS --> PC: IllegalArgumentException\n"No file uploaded"
+    PC --> FE: 400 Bad Request
+    FE --> User: Upload failed
+    deactivate PS
+    deactivate PC
+    return
+end
+
+PS -> PS: isImage(file)\nDetect MIME type with Tika
+alt Not a valid image format
+    PS --> PC: IllegalArgumentException\n"Not a valid image"
+    PC --> FE: 400 Bad Request
+    FE --> User: Invalid file type
+    deactivate PS
+    deactivate PC
+    return
+end
+
+PS -> PS: Extract original filename
+PS -> PS: Check if RAW format\n(CR2, CR3, NEF, ARW, DNG, etc.)
+
+== Metadata Extraction ==
+PS -> PS: extractMetadata(file)
+activate PS
+PS -> PS: Read metadata using\nImageMetadataReader
+
+alt Metadata read fails
+    PS -> PS: Log warning\nContinue with null metadata
+end
+deactivate PS
+
+== Image Loading ==
+PS -> PS: loadImage(file, isRaw)
+activate PS
+
+alt Is RAW file
+    PS -> RIES: extractRawPreview(file)
+    activate RIES
+
+    ' Try Method 1: ImageIO
+    RIES -> RIES: Try ImageIO.read()
+    alt ImageIO succeeds
+        RIES -> RIES: Validate dimensions\n(width > 0, height > 0)
+        RIES --> PS: BufferedImage
+    else ImageIO fails
+
+        ' Try Method 2: Metadata Preview
+        RIES -> RIES: extractMetadataPreview(file)
+        activate RIES
+        RIES -> RIES: Search directories:\nPreview, Thumbnail,\nJPEG, Makernote
+
+        alt Preview found in metadata
+            RIES -> RIES: Extract byte array
+            RIES -> RIES: Decode with ImageIO
+            alt Image valid (> 100px)
+                RIES --> PS: BufferedImage
+            end
+        end
+        deactivate RIES
+
+        alt No metadata preview
+            ' Try Method 3: Byte Scanning
+            RIES -> RIES: findEmbeddedJpegInBytes(file)
+            activate RIES
+            RIES -> RIES: Scan for JPEG markers\n(0xFFD8...0xFFD9)
+
+            loop For each JPEG found
+                RIES -> RIES: Extract JPEG bytes
+                RIES -> RIES: Try decode with ImageIO
+                alt JPEG decoded successfully
+                    RIES -> RIES: Add to candidate list
+                end
+            end
+
+            alt Valid JPEGs found
+                RIES -> RIES: Return largest JPEG\n(best quality)
+                RIES --> PS: BufferedImage
+            end
+            deactivate RIES
+        end
+
+        alt All extraction methods failed
+            RIES -> RIES: Log warning
+            RIES -> RIES: createPlaceholderImage()
+            activate RIES
+            RIES -> RIES: Create 1200x900 image\nwith gradient
+            RIES -> RIES: Draw filename text
+            RIES -> RIES: Draw "RAW Preview\nNot Available"
+            deactivate RIES
+            RIES --> PS: Placeholder BufferedImage
+        end
+    end
+    deactivate RIES
+
+else Regular image file (JPEG, PNG, etc.)
+    PS -> PS: ImageIO.read()\nwith BufferedInputStream
+    alt Read succeeds
+        PS -> PS: Validate image
+    else Read fails
+        PS --> PC: IOException\n"Cannot process image"
+        PC --> FE: 500 Internal Server Error
+        FE --> User: Upload failed
+        deactivate PS
+        deactivate PC
+        return
+    end
+end
+deactivate PS
+
+== Image Compression & Save ==
+PS -> PS: compressAndSave(image, filename)
+activate PS
+PS -> PS: Log original dimensions\n(width x height)
+
+alt Image very small (< 500x500)
+    PS -> PS: Adjust quality = 0.95\nKeep original size
+    note right: Likely a thumbnail,\npreserve quality
+else Normal size image
+    PS -> PS: maxSize = 2560px\nquality = 0.92
+end
+
+PS -> TN: Thumbnails.of(image)\n.size(maxSize)\n.outputQuality(quality)\n.outputFormat("jpg")
+activate TN
+TN -> TN: Resize maintaining\naspect ratio
+TN -> TN: Compress to JPEG
+TN --> PS: byte[] compressed
+deactivate TN
+
+PS -> PS: Generate unique filename:\nUUID_sanitized_name.jpg
+PS -> FS: Write compressed bytes
+activate FS
+FS --> PS: File saved
+deactivate FS
+PS -> PS: Log saved size\n(KB)
+deactivate PS
+
+== Photo Entity Creation ==
+PS -> PS: createPhotoEntity(file, path,\nmetadata, isRaw, originalSize)
+activate PS
+PS -> PS: Create Photo object
+PS -> PS: Set filename, path,\ncontentType, uploadedAt
+PS -> FS: Get saved file size
+activate FS
+FS --> PS: File size (bytes)
+deactivate FS
+
+alt Metadata exists
+    PS -> EES: extractExifData(metadata, photo)
+    activate EES
+
+    EES -> EES: Loop through all\nmetadata directories
+
+    loop For each directory
+        loop For each tag
+            alt Tag matches known EXIF field
+                EES -> EES: Extract value
+
+                alt Camera Make
+                    EES -> EES: Set cameraMake
+                else Camera Model
+                    EES -> EES: Set cameraModel
+                else Lens Model
+                    EES -> EES: Set lensModel
+                else ISO Speed
+                    EES -> EES: Parse and set ISO
+                else Aperture / F-Number
+                    EES -> EES: Format (e.g., f/2.8)\nSet aperture
+                else Shutter Speed
+                    EES -> EES: Set shutterSpeed
+                else Focal Length
+                    EES -> EES: Set focalLength
+                else Image Width/Height
+                    EES -> EES: Store for resolution\ncalculation
+                else Date/Time Original
+                    EES -> EES: Parse to LocalDateTime\nSet dateTaken
+                else GPS Latitude
+                    EES -> EES: Parse GPS coordinates\nSet gpsLatitude
+                else GPS Longitude
+                    EES -> EES: Set gpsLongitude
+                else Exposure Compensation
+                    EES -> EES: Set exposureCompensation
+                else White Balance
+                    EES -> EES: Set whiteBalance
+                else Flash
+                    EES -> EES: Set flashUsed
+                else Color Space
+                    EES -> EES: Set colorSpace
+                end
+            end
+        end
+    end
+
+    EES -> EES: Calculate resolution:\nwidth x height format
+    EES -> EES: Set photo.resolution
+
+    EES --> PS: Photo entity populated
+    deactivate EES
+
+    PS -> PS: Log extracted EXIF data
+else No metadata
+    PS -> PS: Photo saved without\nEXIF data
+end
+deactivate PS
+
+== Database Persistence ==
+PS -> PR: save(photo)
+activate PR
+PR -> PR: Persist Photo entity
+PR --> PS: Saved Photo with ID
+deactivate PR
+
+PS --> PC: Photo object
+deactivate PS
+
+PC -> PC: Map Photo to\nPhotoResponseDto
+PC --> FE: 201 Created\nPhotoResponseDto
+deactivate PC
+
+FE -> FE: Show success message
+FE -> FE: Refresh photo gallery
+FE --> User: Upload successful
+
+
+@enduml
+
