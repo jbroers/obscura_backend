@@ -27,9 +27,6 @@ public class Photo {
     private LocalDateTime uploadedAt;
     private Boolean isRaw;
 
-    @Column(length = 10000)
-    private String metadata;
-
     private String cameraMake;
     private String cameraModel;
     private String lensModel;
@@ -42,8 +39,9 @@ public class Photo {
     private String meteringMode;
     private String flashMode;
 
-    private Integer width;
-    private Integer height;
+    private String resolution;
     private LocalDateTime dateTaken;
     private String orientation;
+    private String gpsLatitude;
+    private String gpsLongitude;
 }
