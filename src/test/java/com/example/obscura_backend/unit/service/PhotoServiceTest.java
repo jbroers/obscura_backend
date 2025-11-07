@@ -1,9 +1,15 @@
 package com.example.obscura_backend.unit.service;
 
+import com.example.obscura_backend.model.Photo;
+import com.example.obscura_backend.repository.PhotoRepository;
 import com.example.obscura_backend.service.PhotoService;
 import com.example.obscura_backend.service.RawImageExtractionService;
 import com.example.obscura_backend.service.ExifExtractionService;
 import org.junit.jupiter.api.*;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.InjectMocks;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.web.multipart.MultipartFile;
@@ -11,9 +17,14 @@ import org.springframework.web.multipart.MultipartFile;
 import java.awt.image.BufferedImage;
 import java.io.IOException;
 import java.nio.file.*;
+import java.util.Arrays;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.*;
 
+@ExtendWith(MockitoExtension.class)
 class PhotoServiceTest {
 
     @Mock
@@ -27,12 +38,13 @@ class PhotoServiceTest {
 
     @InjectMocks
     private PhotoService photoService;
-    private final Path tempDir = Paths.get("build/test-uploads");
+
+    private Path tempDir;
 
     @BeforeEach
     void setup() {
-        photoService = new PhotoService();
-        photoService.setUploadDirPath(tempDir.toString());
+        tempDir = Paths.get("build/test-uploads");
+        ReflectionTestUtils.setField(photoService, "uploadDirPath", tempDir.toString());
         photoService.init();
     }
 
@@ -48,13 +60,12 @@ class PhotoServiceTest {
     }
 
     @Test
-    void savesValidImage() throws Exception {
+    void savesValidJpegImage() throws Exception {
         Path testImage = Paths.get("src/test/resources/test.jpg");
         assertTrue(Files.exists(testImage), "Test image ontbreekt");
 
         byte[] data = Files.readAllBytes(testImage);
         MockMultipartFile file = new MockMultipartFile("photo", "test.jpg", "image/jpeg", data);
-        photoService.savePhoto(file);
 
         Photo mockPhoto = Photo.builder()
                 .id(1L)
