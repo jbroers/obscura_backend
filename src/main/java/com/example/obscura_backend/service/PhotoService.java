@@ -3,8 +3,6 @@ package com.example.obscura_backend.service;
 import com.drew.imaging.ImageMetadataReader;
 import com.drew.imaging.ImageProcessingException;
 import com.drew.metadata.Metadata;
-import com.drew.metadata.Directory;
-import com.drew.metadata.Tag;
 import com.example.obscura_backend.model.Photo;
 import com.example.obscura_backend.repository.PhotoRepository;
 import jakarta.annotation.PostConstruct;
@@ -32,6 +30,8 @@ public class PhotoService {
     private static final Logger logger = LoggerFactory.getLogger(PhotoService.class);
     private final Tika tika = new Tika();
     private final PhotoRepository photoRepository;
+    private final RawImageExtractionService rawImageExtractionService;
+    private final ExifExtractionService exifExtractionService;
 
     private static final List<String> RAW_EXTENSIONS = Arrays.asList(
             "cr2", "cr3", "nef", "arw", "dng", "orf", "raf", "rw2", "pef", "srw", "craw"
@@ -42,8 +42,12 @@ public class PhotoService {
 
     private Path uploadDir;
 
-    public PhotoService(PhotoRepository photoRepository) {
+    public PhotoService(PhotoRepository photoRepository,
+                        RawImageExtractionService rawImageExtractionService,
+                        ExifExtractionService exifExtractionService) {
         this.photoRepository = photoRepository;
+        this.rawImageExtractionService = rawImageExtractionService;
+        this.exifExtractionService = exifExtractionService;
     }
 
     @PostConstruct
@@ -60,6 +64,9 @@ public class PhotoService {
             logger.error("Could not create upload dir: {}", uploadDir, e);
             throw new RuntimeException(e);
         }
+
+        String[] readerFormats = ImageIO.getReaderFormatNames();
+        logger.info("Available ImageIO readers: {}", String.join(", ", readerFormats));
 
         logger.info("Upload directory resolved to: {}", uploadDir.toAbsolutePath());
     }
@@ -121,13 +128,12 @@ public class PhotoService {
     private BufferedImage loadImage(MultipartFile file, boolean isRaw) throws IOException {
         try {
             if (isRaw) {
-                // For RAW files, try to extract embedded preview
-                return extractRawPreview(file);
+                return rawImageExtractionService.extractRawPreview(file);
             }
 
-            // For regular images
-            try (InputStream inputStream = file.getInputStream()) {
-                BufferedImage image = ImageIO.read(inputStream);
+            try (InputStream inputStream = file.getInputStream();
+                 BufferedInputStream bufferedStream = new BufferedInputStream(inputStream)) {
+                BufferedImage image = ImageIO.read(bufferedStream);
                 if (image == null) {
                     throw new IllegalArgumentException("Unable to process image file");
                 }
@@ -139,49 +145,28 @@ public class PhotoService {
         }
     }
 
-    private BufferedImage extractRawPreview(MultipartFile file) throws IOException {
-        try (InputStream inputStream = file.getInputStream()) {
-            Metadata metadata = ImageMetadataReader.readMetadata(inputStream);
-
-            // Try to find embedded JPEG in RAW file
-            for (Directory directory : metadata.getDirectories()) {
-                if (directory.getName().contains("JPEG") || directory.getName().contains("Preview")) {
-                    // Found preview directory - try to extract it
-                    logger.info("Found preview in RAW file");
-                }
-            }
-
-            // Fallback: try ImageIO (works with TwelveMonkeys plugins)
-            inputStream.reset();
-            BufferedImage image = ImageIO.read(inputStream);
-
-            if (image != null) {
-                return image;
-            }
-
-            // Last resort: create placeholder
-            logger.warn("Could not extract preview from RAW file, creating placeholder");
-            return createPlaceholderImage();
-
-        } catch (Exception e) {
-            logger.error("Failed to extract RAW preview: {}", e.getMessage());
-            return createPlaceholderImage();
-        }
-    }
-
-    private BufferedImage createPlaceholderImage() {
-        BufferedImage placeholder = new BufferedImage(800, 600, BufferedImage.TYPE_INT_RGB);
-        // Optionally: add text "RAW Preview Unavailable"
-        return placeholder;
-    }
 
     private String compressAndSave(BufferedImage image, String originalFileName) throws IOException {
         ByteArrayOutputStream baos = new ByteArrayOutputStream();
 
+        int originalWidth = image.getWidth();
+        int originalHeight = image.getHeight();
+        logger.info("Original image size: {}x{}", originalWidth, originalHeight);
+
+        int maxSize = 2560;
+        double quality = 0.92;
+
+        if (originalWidth < 500 && originalHeight < 500) {
+            logger.warn("Image is very small ({}x{}), this might be a thumbnail. Saving as-is with high quality.",
+                    originalWidth, originalHeight);
+            maxSize = Math.max(originalWidth, originalHeight);
+            quality = 0.95;
+        }
+
         Thumbnails.of(image)
-                .size(1920, 1920)
+                .size(maxSize, maxSize)
                 .outputFormat("jpg")
-                .outputQuality(0.8)
+                .outputQuality(quality)
                 .toOutputStream(baos);
 
         String baseFileName = sanitizeFileName(originalFileName);
@@ -193,7 +178,10 @@ public class PhotoService {
 
         byte[] compressedBytes = baos.toByteArray();
         Files.write(targetPath, compressedBytes, StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING);
-        logger.info("Saved compressed image to {}", targetPath.toAbsolutePath());
+
+        long savedSize = compressedBytes.length;
+        logger.info("Saved image to {} ({}x{} -> {} KB)",
+                targetPath.getFileName(), originalWidth, originalHeight, savedSize / 1024);
 
         return targetPath.toString();
     }
@@ -203,27 +191,35 @@ public class PhotoService {
         Photo photo = new Photo();
         photo.setFileName(file.getOriginalFilename());
         photo.setFilePath(filePath);
-        photo.setContentType("image/jpeg");
+        photo.setContentType(file.getContentType());
         Path path = Paths.get(filePath);
         photo.setFileSize(Files.size(path));
-
         photo.setUploadedAt(LocalDateTime.now());
         photo.setIsRaw(isRaw);
 
         if (metadata != null) {
-            StringBuilder metadataStr = new StringBuilder();
-            for (Directory directory : metadata.getDirectories()) {
-                for (Tag tag : directory.getTags()) {
-                    metadataStr.append(tag.getTagName())
-                            .append(": ")
-                            .append(tag.getDescription())
-                            .append("\n");
-                }
-            }
-            photo.setMetadata(metadataStr.toString());
+            exifExtractionService.extractExifData(metadata, photo);
+
+            logger.info("Extracted EXIF data for {}: Make={}, Model={}, Lens={}, ISO={}, Aperture={}, Shutter={}, Focal={}, Resolution={}, Date={}, GPS={},{}",
+                    file.getOriginalFilename(),
+                    photo.getCameraMake(),
+                    photo.getCameraModel(),
+                    photo.getLensModel(),
+                    photo.getIso(),
+                    photo.getAperture(),
+                    photo.getShutterSpeed(),
+                    photo.getFocalLength(),
+                    photo.getResolution(),
+                    photo.getDateTaken(),
+                    photo.getGpsLatitude(),
+                    photo.getGpsLongitude());
         }
 
         return photo;
+    }
+
+    public List<Photo> getAllPhotos() {
+        return photoRepository.findAll();
     }
 
     private String sanitizeFileName(String name) {
