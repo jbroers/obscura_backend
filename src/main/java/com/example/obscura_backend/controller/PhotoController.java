@@ -11,6 +11,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartException;
 import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.multipart.MultipartHttpServletRequest;
 
@@ -101,6 +102,11 @@ public class PhotoController {
             logger.error("Validation error: {}", e.getMessage());
             return ResponseEntity.status(HttpStatus.BAD_REQUEST)
                     .body("{\"error\": \"" + e.getMessage() + "\"}");
+
+        } catch (MultipartException e) {
+            logger.error("File size exceeds limit: {}", e.getMessage());
+            return ResponseEntity.status(HttpStatus.PAYLOAD_TOO_LARGE)
+                    .body("{\"error\": \"The uploaded file exceeds the maximum allowed size.\"}");
 
         } catch (IOException e) {
             logger.error("IO error processing file: {}", e.getMessage(), e);
