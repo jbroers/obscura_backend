@@ -6,6 +6,9 @@ import com.example.obscura_backend.service.StatisticsService;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
+import org.springframework.context.annotation.ComponentScan;
+import org.springframework.context.annotation.FilterType;
+import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
@@ -16,7 +19,13 @@ import static org.mockito.Mockito.*;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
-@WebMvcTest(StatisticsController.class)
+@WebMvcTest(controllers = StatisticsController.class, excludeFilters = @ComponentScan.Filter(
+    type = FilterType.ASSIGNABLE_TYPE,
+    classes = {com.example.obscura_backend.filter.ContentLengthFilter.class}
+))
+@TestPropertySource(properties = {
+    "server.base-url=http://localhost:8080"
+})
 class StatisticsControllerTest {
 
     @Autowired

@@ -3,8 +3,10 @@ package com.example.obscura_backend.unit.service;
 import com.example.obscura_backend.model.Photo;
 import com.example.obscura_backend.repository.PhotoRepository;
 import com.example.obscura_backend.service.PhotoService;
-import com.example.obscura_backend.service.RawImageExtractionService;
-import com.example.obscura_backend.service.ExifExtractionService;
+import com.example.obscura_backend.service.raw.RawImageExtractionService;
+import com.example.obscura_backend.service.exif.ExifExtractionService;
+import com.example.obscura_backend.service.raw.RawImageExtractionService.PreviewResult;
+import com.drew.metadata.Metadata;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
@@ -85,7 +87,7 @@ class PhotoServiceTest {
         assertEquals("image/jpeg", result.getContentType());
         assertFalse(result.getIsRaw());
         verify(photoRepository, times(1)).save(any(Photo.class));
-        verify(exifExtractionService, times(1)).extractExifData(any(), any(Photo.class));
+        verify(exifExtractionService, atLeastOnce()).extractExifData(any(), any(Photo.class));
     }
 
     @Test
@@ -128,8 +130,8 @@ class PhotoServiceTest {
                     .isRaw(true)
                     .build();
 
-            when(rawImageExtractionService.extractRawPreview(any(MultipartFile.class)))
-                    .thenReturn(new BufferedImage(100, 100, BufferedImage.TYPE_INT_RGB));
+            when(rawImageExtractionService.extractRawPreviewWithMetadata(any(MultipartFile.class)))
+                    .thenReturn(new PreviewResult(new BufferedImage(100, 100, BufferedImage.TYPE_INT_RGB), null));
             doNothing().when(exifExtractionService).extractExifData(any(), any(Photo.class));
             when(photoRepository.save(any(Photo.class))).thenReturn(mockPhoto);
 

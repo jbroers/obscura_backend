@@ -2,6 +2,9 @@ plugins {
     id 'java'
     id 'org.springframework.boot' version '3.5.5'
     id 'io.spring.dependency-management' version '1.1.7'
+    id 'checkstyle'
+    id 'com.github.spotbugs' version '6.0.26'
+    id 'jacoco'
 }
 
 group = 'com.example'
@@ -36,6 +39,7 @@ dependencies {
     implementation 'net.coobird:thumbnailator:0.4.20'
     implementation 'com.drewnoakes:metadata-extractor:2.19.0'
     implementation 'org.apache.commons:commons-imaging:1.0-alpha3'
+    implementation 'org.springdoc:springdoc-openapi-starter-webmvc-ui:2.8.14'
     compileOnly 'org.projectlombok:lombok'
     annotationProcessor 'org.projectlombok:lombok'
     testCompileOnly 'org.projectlombok:lombok'
@@ -48,4 +52,91 @@ dependencies {
 
 tasks.named('test') {
     useJUnitPlatform()
+    finalizedBy jacocoTestReport
+}
+
+
+checkstyle {
+    toolVersion = '10.20.2'
+    configFile = file("${rootDir}/config/checkstyle/checkstyle.xml")
+    ignoreFailures = true
+    maxWarnings = 1000
+}
+
+checkstyleMain {
+    source = 'src/main/java'
+}
+
+checkstyleTest {
+    source = 'src/test/java'
+}
+
+
+spotbugs {
+    toolVersion = '4.8.6'
+    effort = 'max'
+    reportLevel = 'medium'
+    ignoreFailures = true
+}
+
+spotbugsMain {
+    reports {
+        html {
+            required = true
+            outputLocation = file("$buildDir/reports/spotbugs/main.html")
+        }
+        xml {
+            required = false
+        }
+    }
+}
+
+spotbugsTest {
+    reports {
+        html {
+            required = true
+            outputLocation = file("$buildDir/reports/spotbugs/test.html")
+        }
+    }
+}
+
+
+jacoco {
+    toolVersion = "0.8.12"
+}
+
+jacocoTestReport {
+    dependsOn test
+    reports {
+        xml.required = true
+        html.required = true
+        csv.required = false
+    }
+    afterEvaluate {
+        classDirectories.setFrom(files(classDirectories.files.collect {
+            fileTree(dir: it, exclude: [
+                '**/config/**',
+                '**/dto/**',
+                '**/entity/**',
+                '**/ObscuraBackendApplication.class'
+            ])
+        }))
+    }
+}
+
+jacocoTestCoverageVerification {
+    violationRules {
+        rule {
+            limit {
+                minimum = 0.50
+            }
+        }
+    }
+}
+
+
+task qualityCheck {
+    dependsOn check, checkstyleMain, checkstyleTest, spotbugsMain, jacocoTestReport
+    group = 'verification'
+    description = 'Runs all quality checks (tests, checkstyle, spotbugs, jacoco)'
 }
