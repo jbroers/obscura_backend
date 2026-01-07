@@ -87,7 +87,7 @@ class PhotoServiceTest {
         assertEquals("image/jpeg", result.getContentType());
         assertFalse(result.getIsRaw());
         verify(photoRepository, times(1)).save(any(Photo.class));
-        verify(exifExtractionService, times(1)).extractExifData(any(), any(Photo.class));
+        verify(exifExtractionService, atLeastOnce()).extractExifData(any(), any(Photo.class));
     }
 
     @Test

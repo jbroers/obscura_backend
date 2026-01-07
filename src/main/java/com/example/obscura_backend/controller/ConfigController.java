@@ -1,5 +1,10 @@
 package com.example.obscura_backend.controller;
 
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.media.Content;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import io.swagger.v3.oas.annotations.responses.ApiResponses;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -16,6 +21,7 @@ import java.util.Map;
 @RestController
 @RequestMapping("/api")
 @CrossOrigin
+@Tag(name = "Configuration", description = "Application configuration endpoints")
 public class ConfigController {
 
     private static final Logger logger = LoggerFactory.getLogger(ConfigController.class);
@@ -46,6 +52,12 @@ public class ConfigController {
     }
 
     @GetMapping("/config")
+    @Operation(summary = "Get application configuration",
+               description = "Returns backend URL and maximum file size configuration")
+    @ApiResponses(value = {
+        @ApiResponse(responseCode = "200", description = "Successfully retrieved configuration",
+                content = @Content(mediaType = "application/json"))
+    })
     public ResponseEntity<Map<String, Object>> getConfig(HttpServletRequest request) {
         String backendUrl = configuredBackendUrl;
         if (backendUrl == null || backendUrl.isBlank()) {

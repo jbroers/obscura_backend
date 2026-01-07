@@ -28,8 +28,43 @@ jobs:
       - name: Grant execute permission for Gradle wrapper
         run: chmod +x ./gradlew
 
+      - name: Run Checkstyle
+        run: ./gradlew checkstyleMain checkstyleTest --no-daemon
+        continue-on-error: true
+
       - name: Build and test backend
         run: ./gradlew clean build --no-daemon
+
+      - name: Run SpotBugs
+        run: ./gradlew spotbugsMain --no-daemon
+        continue-on-error: true
+
+      - name: Generate JaCoCo coverage report
+        run: ./gradlew jacocoTestReport --no-daemon
+
+      - name: Upload Checkstyle reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: checkstyle-reports
+          path: build/reports/checkstyle/
+          retention-days: 30
+
+      - name: Upload SpotBugs reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: spotbugs-reports
+          path: build/reports/spotbugs/
+          retention-days: 30
+
+      - name: Upload JaCoCo coverage report
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: jacoco-coverage-report
+          path: build/reports/jacoco/
+          retention-days: 30
 
       - name: Upload build artifacts
         if: success()
