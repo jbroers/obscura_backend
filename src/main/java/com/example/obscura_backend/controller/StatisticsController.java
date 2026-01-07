@@ -17,6 +17,8 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.util.Map;
+
 @RestController
 @RequestMapping("/statistics")
 @CrossOrigin
@@ -38,7 +40,7 @@ public class StatisticsController {
                         schema = @Schema(implementation = PhotoStatisticsDto.class))),
         @ApiResponse(responseCode = "500", description = "Internal server error")
     })
-    public ResponseEntity<PhotoStatisticsDto> getPhotoStatistics() {
+    public ResponseEntity<?> getPhotoStatistics() {
         try {
             logger.info("Fetching photo statistics");
             PhotoStatisticsDto statistics = statisticsService.getPhotoStatistics();
@@ -46,7 +48,8 @@ public class StatisticsController {
             return ResponseEntity.ok(statistics);
         } catch (Exception e) {
             logger.error("Error calculating statistics: {}", e.getMessage(), e);
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(Map.of("error", "Failed to calculate statistics"));
         }
     }
 }

@@ -51,7 +51,7 @@ public class PhotoController {
                         schema = @Schema(implementation = PhotoMetadataDto.class))),
         @ApiResponse(responseCode = "500", description = "Internal server error")
     })
-    public ResponseEntity<List<PhotoMetadataDto>> getAllPhotos() {
+    public ResponseEntity<?> getAllPhotos() {
         try {
             logger.info("Fetching all photos");
 
@@ -65,7 +65,8 @@ public class PhotoController {
 
         } catch (Exception e) {
             logger.error("Error retrieving photos: {}", e.getMessage(), e);
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(Map.of("error", "Failed to retrieve photos"));
         }
     }
 
