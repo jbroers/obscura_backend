@@ -22,6 +22,10 @@ public class Photo {
 
     private String fileName;
     private String filePath;
+
+    @Column(length = 1024)
+    private String fileUrl;
+
     private String contentType;
     private Long fileSize;
     private LocalDateTime uploadedAt;
@@ -29,14 +33,25 @@ public class Photo {
 
     private String cameraMake;
     private String cameraModel;
+
+    @Column(length = 512)
     private String lensModel;
+
     private Integer iso;
     private String aperture;
     private String shutterSpeed;
     private String focalLength;
+
+    @Column(length = 512)
     private String exposureCompensation;
+
+    @Column(length = 512)
     private String whiteBalance;
+
+    @Column(length = 512)
     private String meteringMode;
+
+    @Column(length = 512)
     private String flashMode;
 
     private String resolution;

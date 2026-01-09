@@ -22,7 +22,7 @@ public class PhotoMapper {
         PhotoResponseDto dto = new PhotoResponseDto();
         dto.setId(photo.getId());
         dto.setFileName(photo.getFileName());
-        dto.setUrl(generatePhotoUrl(photo.getFilePath()));
+        dto.setUrl(photo.getFileUrl() != null ? photo.getFileUrl() : generatePhotoUrl(photo.getFilePath()));
         dto.setContentType(photo.getContentType());
         dto.setFileSize(photo.getFileSize());
         dto.setUploadedAt(photo.getUploadedAt().format(formatter));
@@ -35,7 +35,7 @@ public class PhotoMapper {
         dto.setId(photo.getId());
         dto.setFilename(photo.getFileName());
 
-        String url = generatePhotoUrl(photo.getFilePath());
+        String url = photo.getFileUrl() != null ? photo.getFileUrl() : generatePhotoUrl(photo.getFilePath());
         dto.setUrl(url);
 
         dto.setAperture(photo.getAperture());

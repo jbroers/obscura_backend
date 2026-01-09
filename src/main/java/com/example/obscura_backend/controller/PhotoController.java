@@ -53,14 +53,12 @@ public class PhotoController {
     })
     public ResponseEntity<?> getAllPhotos() {
         try {
-            logger.info("Fetching all photos");
-
             List<Photo> photos = photoService.getAllPhotos();
             List<PhotoMetadataDto> photoDtos = photos.stream()
                     .map(photoMapper::toMetadataDto)
                     .collect(Collectors.toList());
 
-            logger.info("Successfully retrieved {} photos", photoDtos.size());
+            logger.info("Retrieved {} photos", photoDtos.size());
             return ResponseEntity.ok(photoDtos);
 
         } catch (Exception e) {
@@ -84,27 +82,18 @@ public class PhotoController {
             @RequestParam(value = "file", required = false) MultipartFile file,
             HttpServletRequest request) {
         try {
-            logger.info("Received upload request");
-            logger.info("Request content type: {}", request.getContentType());
-            logger.info("Request content length: {}", request.getContentLength());
-
-            logger.info("All parameter names: {}", Collections.list(request.getParameterNames()));
-
             if (file == null && request instanceof MultipartHttpServletRequest) {
                 MultipartHttpServletRequest multipartRequest = (MultipartHttpServletRequest) request;
-                logger.info("Available file parameter names: {}", multipartRequest.getFileMap().keySet());
 
                 if (multipartRequest.getFile("photo") != null) {
                     file = multipartRequest.getFile("photo");
-                    logger.info("Found file under 'photo' parameter");
                 } else if (multipartRequest.getFile("image") != null) {
                     file = multipartRequest.getFile("image");
-                    logger.info("Found file under 'image' parameter");
                 }
             }
 
             if (file == null) {
-                logger.error("No file provided in request - checked 'file', 'photo', and 'image' parameters");
+                logger.error("No file provided in upload request");
                 return ResponseEntity.status(HttpStatus.BAD_REQUEST)
                         .body(Map.of("error", "No file provided. Please select a file to upload. Parameter name must be 'file'."));
             }
@@ -115,8 +104,7 @@ public class PhotoController {
                         .body(Map.of("error", "The uploaded file is empty."));
             }
 
-            logger.info("Processing file: {} ({} bytes)",
-                    file.getOriginalFilename(), file.getSize());
+            logger.info("Uploading: {} ({} bytes)", file.getOriginalFilename(), file.getSize());
 
             Photo photo = photoService.savePhoto(file);
             PhotoResponseDto response = photoMapper.toDto(photo);

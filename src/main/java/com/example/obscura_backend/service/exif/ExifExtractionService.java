@@ -642,7 +642,10 @@ public class ExifExtractionService {
                 else if ((lk.contains("lens") || lk.contains("lensmodel")) && photo.getLensModel() == null) photo.setLensModel(val);
                 else if ((lk.contains("iso") || lk.contains("isospeed")) && photo.getIso() == null) {
                     String digits = val.replaceAll("[^0-9]", ""); if (!digits.isEmpty()) photo.setIso(Integer.parseInt(digits));
-                } else if ((lk.contains("shutterspeed") || lk.contains("exposuretime") || lk.contains("exposure time") || lk.contains("exposure")) && photo.getShutterSpeed() == null) photo.setShutterSpeed(val);
+                } else if ((lk.contains("shutterspeed") || lk.contains("exposuretime") || lk.contains("exposure time") || lk.contains("exposure")) && photo.getShutterSpeed() == null) {
+                    String formatted = parseExposureDescription(val);
+                    photo.setShutterSpeed(formatted != null ? formatted : val);
+                }
                 else if ((lk.contains("aperture") || lk.contains("fnumber")) && photo.getAperture() == null) photo.setAperture(val);
                 else if ((lk.contains("focallength") || lk.contains("focal")) && photo.getFocalLength() == null) photo.setFocalLength(val);
                 else if ((lk.contains("exposure bias") || lk.contains("exposure bias value") || lk.contains("exposure compensation") || lk.contains("exposurecompensation")) && photo.getExposureCompensation() == null) {

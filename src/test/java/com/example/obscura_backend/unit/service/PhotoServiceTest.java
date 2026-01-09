@@ -3,17 +3,17 @@ package com.example.obscura_backend.unit.service;
 import com.example.obscura_backend.model.Photo;
 import com.example.obscura_backend.repository.PhotoRepository;
 import com.example.obscura_backend.service.PhotoService;
+import com.example.obscura_backend.service.MinioService;
 import com.example.obscura_backend.service.raw.RawImageExtractionService;
 import com.example.obscura_backend.service.exif.ExifExtractionService;
 import com.example.obscura_backend.service.raw.RawImageExtractionService.PreviewResult;
 import com.drew.metadata.Metadata;
 import org.junit.jupiter.api.*;
-import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.InjectMocks;
-import org.mockito.Mock;
-import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.mock.web.MockMultipartFile;
-import org.springframework.test.util.ReflectionTestUtils;
+import org.springframework.test.context.TestPropertySource;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.awt.image.BufferedImage;
@@ -26,32 +26,32 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
 
-@ExtendWith(MockitoExtension.class)
+@SpringBootTest
+@TestPropertySource(properties = {
+    "storage.type=local",
+    "storage.local.upload-dir=build/test-uploads"
+})
 class PhotoServiceTest {
 
-    @Mock
+    @MockBean
     private PhotoRepository photoRepository;
 
-    @Mock
+    @MockBean
     private RawImageExtractionService rawImageExtractionService;
 
-    @Mock
+    @MockBean
     private ExifExtractionService exifExtractionService;
 
-    @InjectMocks
+    @Autowired
     private PhotoService photoService;
-
-    private Path tempDir;
 
     @BeforeEach
     void setup() {
-        tempDir = Paths.get("build/test-uploads");
-        ReflectionTestUtils.setField(photoService, "uploadDirPath", tempDir.toString());
-        photoService.init();
     }
 
     @AfterEach
     void cleanup() throws IOException {
+        Path tempDir = Paths.get("build/test-uploads");
         if (Files.exists(tempDir)) {
             Files.walk(tempDir)
                     .sorted((a, b) -> b.compareTo(a))
@@ -72,7 +72,8 @@ class PhotoServiceTest {
         Photo mockPhoto = Photo.builder()
                 .id(1L)
                 .fileName("test.jpg")
-                .filePath(tempDir.toString())
+                .filePath("uuid-test.jpg")
+                .fileUrl("http://localhost:8080/api/photos/files/uuid-test.jpg")
                 .contentType("image/jpeg")
                 .isRaw(false)
                 .build();
