@@ -21,38 +21,22 @@ public class RequestLoggingFilter implements Filter {
 
         HttpServletRequest httpRequest = (HttpServletRequest) request;
 
-        logger.info("=== Incoming Request ===");
-        logger.info("Method: {}", httpRequest.getMethod());
-        logger.info("URI: {}", httpRequest.getRequestURI());
-        logger.info("Content-Type: {}", httpRequest.getContentType());
-        logger.info("Content-Length: {}", httpRequest.getContentLength());
-
-        logger.info("Headers:");
-        Collections.list(httpRequest.getHeaderNames()).forEach(headerName ->
-            logger.info("  {}: {}", headerName, httpRequest.getHeader(headerName))
-        );
-
-        logger.info("Parameters:");
-        httpRequest.getParameterMap().forEach((key, value) ->
-            logger.info("  {}: {}", key, String.join(",", value))
-        );
+        String logMessage = String.format("%s %s", httpRequest.getMethod(), httpRequest.getRequestURI());
 
         if (httpRequest.getContentType() != null && httpRequest.getContentType().contains("multipart/form-data")) {
             try {
-                logger.info("Multipart Parts:");
                 for (Part part : httpRequest.getParts()) {
-                    logger.info("  Part name: {}, size: {}, content-type: {}, filename: {}",
-                        part.getName(),
-                        part.getSize(),
-                        part.getContentType(),
-                        part.getSubmittedFileName());
+                    if (part.getSubmittedFileName() != null) {
+                        logMessage += String.format(" [%s, %.2f MB]",
+                            part.getSubmittedFileName(),
+                            part.getSize() / 1024.0 / 1024.0);
+                    }
                 }
             } catch (Exception e) {
-                logger.warn("Could not read multipart parts: {}", e.getMessage());
             }
         }
 
-        logger.info("======================");
+        logger.info(logMessage);
 
         chain.doFilter(request, response);
     }

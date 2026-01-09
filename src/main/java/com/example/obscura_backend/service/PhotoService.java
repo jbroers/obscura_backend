@@ -35,43 +35,20 @@ public class PhotoService {
     private final PhotoRepository photoRepository;
     private final RawImageExtractionService rawImageExtractionService;
     private final ExifExtractionService exifExtractionService;
+    private final MinioService minioService;
 
     private static final List<String> RAW_EXTENSIONS = Arrays.asList(
             "cr2", "cr3", "nef", "arw", "dng", "orf", "raf", "rw2", "pef", "srw", "craw"
     );
 
-    @Value("${photo.upload-dir:/uploads}")
-    private String uploadDirPath;
-
-    private Path uploadDir;
-
     public PhotoService(PhotoRepository photoRepository,
                         RawImageExtractionService rawImageExtractionService,
-                        ExifExtractionService exifExtractionService) {
+                        ExifExtractionService exifExtractionService,
+                        MinioService minioService) {
         this.photoRepository = photoRepository;
         this.rawImageExtractionService = rawImageExtractionService;
         this.exifExtractionService = exifExtractionService;
-    }
-
-    @PostConstruct
-    public void init() {
-        if (uploadDirPath == null || uploadDirPath.isBlank()) {
-            throw new IllegalStateException("Upload directory path is not set");
-        }
-
-        uploadDir = Paths.get(uploadDirPath);
-
-        try {
-            Files.createDirectories(uploadDir);
-        } catch (IOException e) {
-            logger.error("Could not create upload dir: {}", uploadDir, e);
-            throw new RuntimeException(e);
-        }
-
-        String[] readerFormats = ImageIO.getReaderFormatNames();
-        logger.info("Available ImageIO readers: {}", String.join(", ", readerFormats));
-
-        logger.info("Upload directory resolved to: {}", uploadDir.toAbsolutePath());
+        this.minioService = minioService;
     }
 
     public Photo savePhoto(MultipartFile file) throws IOException {
@@ -172,32 +149,8 @@ public class PhotoService {
             logger.debug("exiftool fallback failed: {}", e.getMessage());
         }
 
-        try {
-            java.util.Map<String,String> topMap = exifExtractionService.collectMetadataFromFile(file);
-            java.util.Map<String,String> embeddedMap = (embeddedMetadata != null) ? exifExtractionService.collectMetadata(embeddedMetadata) : new java.util.LinkedHashMap<>();
-            java.util.Map<String,String> selectedMap = (metadata != null) ? exifExtractionService.collectMetadata(metadata) : new java.util.LinkedHashMap<>();
-            java.util.Map<String,String> exiftoolMapCopy = (exiftoolMap != null) ? new java.util.LinkedHashMap<>(exiftoolMap) : new java.util.LinkedHashMap<>();
-
-            java.util.Map<String,String> topFields = exifExtractionService.extractCommonFieldsFromMap(topMap);
-            java.util.Map<String,String> embeddedFields = exifExtractionService.extractCommonFieldsFromMap(embeddedMap);
-            java.util.Map<String,String> selectedFields = exifExtractionService.extractCommonFieldsFromMap(selectedMap);
-            java.util.Map<String,String> exiftoolFields = exifExtractionService.extractCommonFieldsFromMap(exiftoolMapCopy);
-
-            String[] keys = new String[]{"Make","Model","Lens","ISO","Aperture","ShutterSpeed","FocalLength","Resolution","DateTaken","GPSLatitude","GPSLongitude","Orientation"};
-            StringBuilder coverage = new StringBuilder();
-            coverage.append("Metadata coverage report:\n");
-            for (String k : keys) {
-                coverage.append(String.format("  %-12s : top=%s, embedded=%s, selected=%s, exiftool=%s\n",
-                        k,
-                        (notEmpty(topFields.get(k)) ? "Y" : "-"),
-                        (notEmpty(embeddedFields.get(k)) ? "Y" : "-"),
-                        (notEmpty(selectedFields.get(k)) ? "Y" : "-"),
-                        (notEmpty(exiftoolFields.get(k)) ? "Y" : "-")
-                ));
-            }
-            logger.info(coverage.toString());
-        } catch (Exception e) {
-            logger.debug("Metadata coverage diagnostics failed: {}", e.getMessage());
+        if (isRaw) {
+            logger.debug("Processing RAW format: {}", originalFileName);
         }
 
         BufferedImage image = previewFromRaw != null ? previewFromRaw : loadImage(file, isRaw);
@@ -208,7 +161,9 @@ public class PhotoService {
         try {
             if (isRaw) {
                 cr3map = CR3Parser.parse(file);
-                if (cr3map != null && !cr3map.isEmpty()) logger.info("CR3 parser returned {} keys: {}", cr3map.size(), cr3map.keySet());
+                if (cr3map != null && !cr3map.isEmpty()) {
+                    logger.debug("CR3 parser extracted {} metadata tags", cr3map.size());
+                }
             }
         } catch (Exception e) {
             logger.debug("CR3 parser call failed: {}", e.getMessage());
@@ -279,14 +234,11 @@ public class PhotoService {
 
         int originalWidth = image.getWidth();
         int originalHeight = image.getHeight();
-        logger.info("Original image size: {}x{}", originalWidth, originalHeight);
 
         int maxSize = 2560;
         double quality = 0.92;
 
         if (originalWidth < 500 && originalHeight < 500) {
-            logger.warn("Image is very small ({}x{}), this might be a thumbnail. Saving as-is with high quality.",
-                    originalWidth, originalHeight);
             maxSize = Math.max(originalWidth, originalHeight);
             quality = 0.95;
         }
@@ -302,16 +254,14 @@ public class PhotoService {
         String nameWithoutExt = baseFileName.substring(0, baseFileName.length() - extension.length() - 1);
         String uniqueFileName = UUID.randomUUID() + "_" + nameWithoutExt + ".jpg";
 
-        Path targetPath = uploadDir.resolve(uniqueFileName);
-
         byte[] compressedBytes = baos.toByteArray();
-        Files.write(targetPath, compressedBytes, StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING);
+
+        String minioFileName = minioService.uploadBytes(compressedBytes, uniqueFileName, "image/jpeg");
 
         long savedSize = compressedBytes.length;
-        logger.info("Saved image to {} ({}x{} -> {} KB)",
-                targetPath.getFileName(), originalWidth, originalHeight, savedSize / 1024);
+        logger.info("Saved: {} ({}x{}, {} KB)", minioFileName, originalWidth, originalHeight, savedSize / 1024);
 
-        return targetPath.toString();
+        return minioFileName;
     }
 
     private Photo createPhotoEntity(MultipartFile file, String filePath, Metadata primaryMetadata, Metadata secondaryMetadata,
@@ -320,8 +270,11 @@ public class PhotoService {
         photo.setFileName(file.getOriginalFilename());
         photo.setFilePath(filePath);
         photo.setContentType(file.getContentType());
-        Path path = Paths.get(filePath);
-        photo.setFileSize(Files.size(path));
+        photo.setFileSize(file.getSize());
+
+        String fileUrl = minioService.getFileUrl(filePath);
+        photo.setFileUrl(fileUrl);
+
         photo.setUploadedAt(LocalDateTime.now());
         photo.setIsRaw(isRaw);
 
@@ -332,40 +285,42 @@ public class PhotoService {
             exifExtractionService.extractExifData(secondaryMetadata, photo);
         }
 
-        if ((primaryMetadata != null || secondaryMetadata != null)) {
-            logger.info("Extracted EXIF data for {}: Make={}, Model={}, Lens={}, ISO={}, Aperture={}, Shutter={}, Focal={}, Resolution={}, Date={}, GPS={},{}",
-                    file.getOriginalFilename(),
-                    photo.getCameraMake(),
-                    photo.getCameraModel(),
-                    photo.getLensModel(),
-                    photo.getIso(),
-                    photo.getAperture(),
-                    photo.getShutterSpeed(),
-                    photo.getFocalLength(),
-                    photo.getResolution(),
-                    photo.getDateTaken(),
-                    photo.getGpsLatitude(),
-                    photo.getGpsLongitude());
-        } else if (exiftoolMap != null) {
+        if (exiftoolMap != null && !exiftoolMap.isEmpty()) {
             exifExtractionService.populateFromMap(exiftoolMap, photo);
-            logger.info("Populated EXIF data from exiftool map for {}", file.getOriginalFilename());
         }
 
         if (cr3map != null && !cr3map.isEmpty()) {
             exifExtractionService.populateFromMap(cr3map, photo);
-            logger.info("Populated EXIF data from CR3 parser map for {}", file.getOriginalFilename());
-            try {
-                logger.info("CR3 map keys: {}", cr3map.keySet());
-                logger.info("Photo after CR3 map: Make={}, Model={}, Lens={}, ISO={}, Aperture={}, Shutter={}, Focal={}, Resolution={}, Date={}, GPS={},{}",
-                        photo.getCameraMake(), photo.getCameraModel(), photo.getLensModel(), photo.getIso(), photo.getAperture(), photo.getShutterSpeed(), photo.getFocalLength(), photo.getResolution(), photo.getDateTaken(), photo.getGpsLatitude(), photo.getGpsLongitude());
-            } catch (Exception ignored) {}
         }
+
+        logger.debug("Extracted metadata for {}: {}, {}, ISO {}",
+            file.getOriginalFilename(),
+            photo.getCameraMake(),
+            photo.getCameraModel(),
+            photo.getIso());
 
         return photo;
     }
 
     public List<Photo> getAllPhotos() {
         return photoRepository.findAll();
+    }
+
+    public void deletePhoto(Long photoId) {
+        Photo photo = photoRepository.findById(photoId)
+                .orElseThrow(() -> new RuntimeException("Photo not found with id: " + photoId));
+
+        if (photo.getFilePath() != null) {
+            try {
+                minioService.deleteFile(photo.getFilePath());
+                logger.info("Deleted photo from MinIO: {}", photo.getFilePath());
+            } catch (Exception e) {
+                logger.error("Failed to delete photo from MinIO: {}", photo.getFilePath(), e);
+            }
+        }
+
+        photoRepository.delete(photo);
+        logger.info("Deleted photo from database: {}", photoId);
     }
 
     private String sanitizeFileName(String name) {

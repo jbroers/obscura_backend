@@ -36,5 +36,7 @@ out/
 ### VS Code ###
 .vscode/
 /src/test/resources/raw/raws/
-
 /src/test/resources/raw/
+
+uploads/
+
