@@ -11,7 +11,7 @@ import com.drew.metadata.Metadata;
 import org.junit.jupiter.api.*;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.web.multipart.MultipartFile;
@@ -33,13 +33,13 @@ import static org.mockito.Mockito.*;
 })
 class PhotoServiceTest {
 
-    @MockitoBean
+    @MockBean
     private PhotoRepository photoRepository;
 
-    @MockitoBean
+    @MockBean
     private RawImageExtractionService rawImageExtractionService;
 
-    @MockitoBean
+    @MockBean
     private ExifExtractionService exifExtractionService;
 
     @Autowired
@@ -170,51 +170,5 @@ class PhotoServiceTest {
         assertNotNull(result);
         assertTrue(result.isEmpty());
         verify(photoRepository, times(1)).findAll();
-    }
-
-    @Test
-    void savePhotosHandlesMultipleFiles() throws Exception {
-        Path testImage = Paths.get("src/test/resources/test.jpg");
-        assertTrue(Files.exists(testImage), "Test image ontbreekt");
-
-        byte[] data = Files.readAllBytes(testImage);
-        MockMultipartFile file1 = new MockMultipartFile("photo1", "photo1.jpg", "image/jpeg", data);
-        MockMultipartFile file2 = new MockMultipartFile("photo2", "photo2.jpg", "image/jpeg", data);
-
-        Photo mockPhoto1 = Photo.builder()
-                .id(1L)
-                .fileName("photo1.jpg")
-                .filePath("uuid-photo1.jpg")
-                .contentType("image/jpeg")
-                .isRaw(false)
-                .build();
-
-        Photo mockPhoto2 = Photo.builder()
-                .id(2L)
-                .fileName("photo2.jpg")
-                .filePath("uuid-photo2.jpg")
-                .contentType("image/jpeg")
-                .isRaw(false)
-                .build();
-
-        doNothing().when(exifExtractionService).extractExifData(any(), any(Photo.class));
-        when(photoRepository.save(any(Photo.class)))
-                .thenReturn(mockPhoto1)
-                .thenReturn(mockPhoto2);
-
-        List<MultipartFile> files = Arrays.asList(file1, file2);
-        List<Photo> results = photoService.savePhotos(files);
-
-        assertNotNull(results);
-        assertEquals(2, results.size());
-        assertEquals("photo1.jpg", results.get(0).getFileName());
-        assertEquals("photo2.jpg", results.get(1).getFileName());
-        verify(photoRepository, times(2)).save(any(Photo.class));
-    }
-
-    @Test
-    void savePhotosThrowsOnEmptyList() {
-        assertThrows(IllegalArgumentException.class, () -> photoService.savePhotos(Arrays.asList()));
-        verify(photoRepository, never()).save(any(Photo.class));
     }
 }

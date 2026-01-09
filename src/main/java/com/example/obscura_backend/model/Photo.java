@@ -20,13 +20,10 @@ public class Photo {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @Column(length = 512)
     private String fileName;
-
-    @Column(length = 1024)
     private String filePath;
 
-    @Column(length = 2048)
+    @Column(length = 1024)
     private String fileUrl;
 
     private String contentType;

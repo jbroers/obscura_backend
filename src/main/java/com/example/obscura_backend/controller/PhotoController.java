@@ -58,6 +58,7 @@ public class PhotoController {
                     .map(photoMapper::toMetadataDto)
                     .collect(Collectors.toList());
 
+            logger.info("Retrieved {} photos", photoDtos.size());
             return ResponseEntity.ok(photoDtos);
 
         } catch (Exception e) {
@@ -103,6 +104,7 @@ public class PhotoController {
                         .body(Map.of("error", "The uploaded file is empty."));
             }
 
+            logger.info("Uploading: {} ({} bytes)", file.getOriginalFilename(), file.getSize());
 
             Photo photo = photoService.savePhoto(file);
             PhotoResponseDto response = photoMapper.toDto(photo);
@@ -122,58 +124,6 @@ public class PhotoController {
             logger.error("IO error processing file: {}", e.getMessage(), e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                     .body(Map.of("error", "Failed to process the file."));
-
-        } catch (Exception e) {
-            logger.error("Unexpected error: {}", e.getMessage(), e);
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                    .body(Map.of("error", "An unexpected error occurred."));
-        }
-    }
-
-    @PostMapping("/upload/batch")
-    @Operation(summary = "Upload multiple photos", description = "Uploads multiple photo files (JPEG or RAW format) and extracts metadata")
-    @ApiResponses(value = {
-        @ApiResponse(responseCode = "201", description = "Photos uploaded successfully"),
-        @ApiResponse(responseCode = "400", description = "Bad request - invalid files or no files provided"),
-        @ApiResponse(responseCode = "413", description = "File size exceeds limit"),
-        @ApiResponse(responseCode = "500", description = "Internal server error")
-    })
-    public ResponseEntity<Object> uploadPhotos(@RequestParam("files") List<MultipartFile> files) {
-        try {
-            if (files == null || files.isEmpty()) {
-                logger.error("No files provided in batch upload request");
-                return ResponseEntity.status(HttpStatus.BAD_REQUEST)
-                        .body(Map.of("error", "No files provided. Please select files to upload."));
-            }
-
-            logger.info("Batch upload request received with {} file(s)", files.size());
-
-            List<Photo> photos = photoService.savePhotos(files);
-            List<PhotoResponseDto> responses = photos.stream()
-                    .map(photoMapper::toDto)
-                    .collect(Collectors.toList());
-
-            logger.info("Batch upload successful: {} photo(s) uploaded", responses.size());
-
-            return ResponseEntity.status(HttpStatus.CREATED).body(Map.of(
-                "message", "Successfully uploaded " + responses.size() + " photo(s)",
-                "photos", responses
-            ));
-
-        } catch (IllegalArgumentException e) {
-            logger.error("Validation error: {}", e.getMessage());
-            return ResponseEntity.status(HttpStatus.BAD_REQUEST)
-                    .body(Map.of("error", e.getMessage()));
-
-        } catch (MultipartException e) {
-            logger.error("File size exceeds limit: {}", e.getMessage());
-            return ResponseEntity.status(HttpStatus.PAYLOAD_TOO_LARGE)
-                    .body(Map.of("error", "One or more uploaded files exceed the maximum allowed size."));
-
-        } catch (IOException e) {
-            logger.error("IO error processing files: {}", e.getMessage(), e);
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                    .body(Map.of("error", "Failed to process one or more files: " + e.getMessage()));
 
         } catch (Exception e) {
             logger.error("Unexpected error: {}", e.getMessage(), e);

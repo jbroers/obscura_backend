@@ -45,7 +45,7 @@ public class ContentLengthFilter implements Filter {
             throws IOException, ServletException {
         if (maxBytes < 0) {
             maxBytes = parseSize(maxRequestSizeRaw);
-            logger.info("Max request size: {}", maxRequestSizeRaw);
+            logger.info("ContentLengthFilter maxBytes set to {}", maxBytes);
         }
 
         HttpServletRequest request = (HttpServletRequest) req;
@@ -56,10 +56,10 @@ public class ContentLengthFilter implements Filter {
             try {
                 long length = Long.parseLong(cl);
                 if (length > maxBytes) {
-                    logger.warn("Request rejected: {} > {}", formatSize(length), maxRequestSizeRaw);
+                    logger.warn("Rejected request with Content-Length {} > {}", length, maxBytes);
                     response.setStatus(HttpServletResponse.SC_REQUEST_ENTITY_TOO_LARGE);
                     response.setContentType("application/json");
-                    response.getWriter().write("{\"error\":\"The uploaded file(s) exceed the maximum allowed size of " + maxRequestSizeRaw + ".\"}");
+                    response.getWriter().write("{\"error\":\"The uploaded file exceeds the maximum allowed size.\",\"maxFileSize\":\"" + maxRequestSizeRaw + "\"}");
                     return;
                 }
             } catch (NumberFormatException ignored) {
@@ -67,13 +67,6 @@ public class ContentLengthFilter implements Filter {
         }
 
         chain.doFilter(req, res);
-    }
-
-    private String formatSize(long bytes) {
-        if (bytes >= 1024 * 1024) {
-            return String.format("%.2f MB", bytes / (1024.0 * 1024.0));
-        }
-        return String.format("%.2f KB", bytes / 1024.0);
     }
 }
 

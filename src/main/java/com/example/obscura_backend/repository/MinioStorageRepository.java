@@ -6,7 +6,6 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
-import org.springframework.context.annotation.Primary;
 import org.springframework.stereotype.Repository;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -18,7 +17,6 @@ import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 
 @Repository
-@Primary
 @ConditionalOnProperty(name = "storage.type", havingValue = "minio", matchIfMissing = true)
 @RequiredArgsConstructor
 @Slf4j
@@ -52,7 +50,8 @@ public class MinioStorageRepository implements StorageRepository {
                 log.info("MinIO bucket '{}' already exists", bucketName);
             }
         } catch (Exception e) {
-            log.warn("MinIO is not available - will fall back to local storage: {}", e.getMessage());
+            log.error("Error initializing MinIO bucket", e);
+            throw new RuntimeException("Failed to initialize MinIO bucket", e);
         }
     }
 

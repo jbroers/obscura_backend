@@ -3,6 +3,7 @@ package com.example.obscura_backend.repository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Repository;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -12,6 +13,7 @@ import java.nio.file.*;
 import java.util.UUID;
 
 @Repository
+@ConditionalOnProperty(name = "storage.type", havingValue = "local", matchIfMissing = false)
 @RequiredArgsConstructor
 @Slf4j
 public class LocalStorageRepository implements StorageRepository {

@@ -51,32 +51,6 @@ public class PhotoService {
         this.minioService = minioService;
     }
 
-    public List<Photo> savePhotos(List<MultipartFile> files) throws IOException {
-        if (files == null || files.isEmpty()) {
-            throw new IllegalArgumentException("No files uploaded");
-        }
-
-        logger.info("Starting batch upload of {} file(s)", files.size());
-        List<Photo> savedPhotos = new java.util.ArrayList<>();
-        int successCount = 0;
-
-        for (int i = 0; i < files.size(); i++) {
-            MultipartFile file = files.get(i);
-            try {
-                logger.debug("Processing file {}/{}: {}", i + 1, files.size(), file.getOriginalFilename());
-                Photo photo = savePhoto(file);
-                savedPhotos.add(photo);
-                successCount++;
-            } catch (Exception e) {
-                logger.error("Failed to save photo {}/{} ({}): {}", i + 1, files.size(), file.getOriginalFilename(), e.getMessage());
-                throw new IOException("Failed to save photo: " + file.getOriginalFilename(), e);
-            }
-        }
-
-        logger.info("Batch upload completed: {}/{} files saved successfully", successCount, files.size());
-        return savedPhotos;
-    }
-
     public Photo savePhoto(MultipartFile file) throws IOException {
         if (file == null || file.isEmpty()) {
             throw new IllegalArgumentException("No file uploaded");
@@ -108,8 +82,13 @@ public class PhotoService {
                     Metadata embedded = pr.metadata;
                     if (embedded != null) {
                         embeddedMetadata = embedded;
+                        int dirCount = (int) java.util.stream.StreamSupport.stream(embedded.getDirectories().spliterator(), false).count();
+                        logger.info("Embedded JPEG metadata found ({} directories)", dirCount);
+                        try { exifExtractionService.logMetadataSummary(embedded, "embedded"); } catch (Exception ignored) {}
+
                         if (metadata == null) {
                             metadata = embedded;
+                            logger.info("Using embedded JPEG metadata because top-level metadata was null");
                         } else {
                             boolean topHasDate = hasDateInMetadata(metadata);
                             boolean embeddedHasDate = hasDateInMetadata(embedded);
@@ -117,21 +96,33 @@ public class PhotoService {
                             int embeddedTags = countMetadataTags(embedded);
                             if (embeddedHasDate && !topHasDate) {
                                 metadata = embedded;
+                                logger.info("Prefer embedded metadata because it contains a date");
                             } else if (embeddedTags > topTags + 5) {
                                 metadata = embedded;
+                                logger.info("Prefer embedded metadata because it has more tags ({} > {})", embeddedTags, topTags);
+                            } else {
+                                logger.debug("Keeping top-level metadata (embeddedTags={}, topTags={}, embeddedHasDate={}, topHasDate={})",
+                                        embeddedTags, topTags, embeddedHasDate, topHasDate);
                             }
                         }
                     }
                 }
+                try { if (metadata != null) exifExtractionService.logMetadataSummary(metadata, "selected"); } catch (Exception ignored) {}
             } catch (Exception e) {
                 logger.debug("Embedded preview+metadata extraction failed: {}", e.getMessage());
             }
+        }
+
+        if (metadata == null) {
+            logger.debug("Metadata remains null after attempts");
         }
 
         try {
             if (metadata == null || photoMetadataIncomplete(metadata)) {
                 Metadata embeddedOnly = rawImageExtractionService.extractMetadataFromEmbeddedJpeg(file);
                 if (embeddedOnly != null) {
+                    logger.info("Fallback: extracted metadata from embedded JPEG/dcraw preview");
+                    try { exifExtractionService.logMetadataSummary(embeddedOnly, "fallback-embedded"); } catch (Exception ignored) {}
                     if (metadata == null) {
                         metadata = embeddedOnly;
                     } else {
@@ -151,12 +142,16 @@ public class PhotoService {
                 java.util.Map<String, String> exifmap = rawImageExtractionService.extractMetadataWithExiftool(file);
                 if (exifmap != null && !exifmap.isEmpty()) {
                     exiftoolMap = exifmap;
+                    logger.info("Using exiftool fallback with {} tags", exifmap.size());
                 }
             }
         } catch (Exception e) {
             logger.debug("exiftool fallback failed: {}", e.getMessage());
         }
 
+        if (isRaw) {
+            logger.debug("Processing RAW format: {}", originalFileName);
+        }
 
         BufferedImage image = previewFromRaw != null ? previewFromRaw : loadImage(file, isRaw);
 
@@ -166,6 +161,9 @@ public class PhotoService {
         try {
             if (isRaw) {
                 cr3map = CR3Parser.parse(file);
+                if (cr3map != null && !cr3map.isEmpty()) {
+                    logger.debug("CR3 parser extracted {} metadata tags", cr3map.size());
+                }
             }
         } catch (Exception e) {
             logger.debug("CR3 parser call failed: {}", e.getMessage());
@@ -254,12 +252,14 @@ public class PhotoService {
         String baseFileName = sanitizeFileName(originalFileName);
         String extension = getFileExtension(baseFileName);
         String nameWithoutExt = baseFileName.substring(0, baseFileName.length() - extension.length() - 1);
-        String uniqueFileName = UUID.randomUUID() + ".jpg";
+        String uniqueFileName = UUID.randomUUID() + "_" + nameWithoutExt + ".jpg";
 
         byte[] compressedBytes = baos.toByteArray();
 
         String minioFileName = minioService.uploadBytes(compressedBytes, uniqueFileName, "image/jpeg");
 
+        long savedSize = compressedBytes.length;
+        logger.info("Saved: {} ({}x{}, {} KB)", minioFileName, originalWidth, originalHeight, savedSize / 1024);
 
         return minioFileName;
     }
