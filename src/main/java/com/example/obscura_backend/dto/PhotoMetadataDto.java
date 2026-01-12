@@ -15,6 +15,7 @@ public class PhotoMetadataDto {
     private Long id;
     private String filename;
     private String url;
+    private Long fileSize;
     private String aperture;
     private String shutterSpeed;
     private String iso;

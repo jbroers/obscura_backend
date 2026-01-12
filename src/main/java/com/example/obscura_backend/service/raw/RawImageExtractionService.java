@@ -47,7 +47,7 @@ public class RawImageExtractionService {
             image = ImageIO.read(bufferedStream);
 
             if (image != null && image.getWidth() > 0 && image.getHeight() > 0) {
-                logger.info("V Loaded RAW with ImageIO: {}x{} pixels", image.getWidth(), image.getHeight());
+                logger.debug("Loaded RAW with ImageIO: {}x{} pixels", image.getWidth(), image.getHeight());
                 try (InputStream metaStream = file.getInputStream()) {
                     foundMetadata = ImageMetadataReader.readMetadata(metaStream);
                 } catch (Exception ignored) {
