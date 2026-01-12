@@ -1,7 +1,6 @@
 package com.example.obscura_backend.repository;
 
 import io.minio.*;
-import io.minio.http.Method;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -15,7 +14,6 @@ import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.UUID;
-import java.util.concurrent.TimeUnit;
 
 @Repository
 @Primary
@@ -32,13 +30,13 @@ public class MinioStorageRepository implements StorageRepository {
     @Value("${minio.endpoint}")
     private String minioEndpoint;
 
-    @Value("${minio.external-endpoint}")
-    private String minioExternalEndpoint;
-
     @PostConstruct
     @Override
     public void initialize() {
         try {
+            log.info("MinIO client endpoint: {}", minioEndpoint);
+            log.info("Using public bucket with direct URLs (no presigned URLs)");
+
             boolean bucketExists = minioClient.bucketExists(
                 BucketExistsArgs.builder().bucket(bucketName).build()
             );
@@ -51,6 +49,29 @@ public class MinioStorageRepository implements StorageRepository {
             } else {
                 log.info("MinIO bucket '{}' already exists", bucketName);
             }
+
+            String policy = String.format("""
+                {
+                    "Version": "2012-10-17",
+                    "Statement": [
+                        {
+                            "Effect": "Allow",
+                            "Principal": {"AWS": "*"},
+                            "Action": ["s3:GetObject"],
+                            "Resource": ["arn:aws:s3:::%s/*"]
+                        }
+                    ]
+                }
+                """, bucketName);
+
+            minioClient.setBucketPolicy(
+                SetBucketPolicyArgs.builder()
+                    .bucket(bucketName)
+                    .config(policy)
+                    .build()
+            );
+            log.info("MinIO bucket '{}' set to public (anonymous download)", bucketName);
+
         } catch (Exception e) {
             log.warn("MinIO is not available - will fall back to local storage: {}", e.getMessage());
         }
@@ -109,24 +130,13 @@ public class MinioStorageRepository implements StorageRepository {
     @Override
     public String getFileUrl(String fileName) {
         try {
-            String url = minioClient.getPresignedObjectUrl(
-                GetPresignedObjectUrlArgs.builder()
-                    .method(Method.GET)
-                    .bucket(bucketName)
-                    .object(fileName)
-                    .expiry(7, TimeUnit.DAYS)
-                    .build()
-            );
+            String publicUrl = String.format("http://localhost:9000/%s/%s", bucketName, fileName);
 
-            if (!minioEndpoint.equals(minioExternalEndpoint)) {
-                url = url.replace(minioEndpoint, minioExternalEndpoint);
-                log.debug("Replaced internal endpoint with external: {} -> {}", minioEndpoint, minioExternalEndpoint);
-            }
-
-            log.debug("Generated presigned URL for: {}", fileName);
-            return url;
+            log.info("Generated public URL for: {}", fileName);
+            log.debug("Public URL: {}", publicUrl);
+            return publicUrl;
         } catch (Exception e) {
-            log.error("Error generating presigned URL for file: {}", fileName, e);
+            log.error("Error generating URL for file: {}", fileName, e);
             return null;
         }
     }
