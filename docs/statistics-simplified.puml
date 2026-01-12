@@ -1,0 +1,93 @@
+@startuml Statistics - Simplified
+!theme plain
+skinparam BoxPadding 5
+skinparam ParticipantPadding 10
+
+actor User
+participant Frontend
+participant Controller
+participant Service
+participant Repository
+database PostgreSQL
+
+User -> Frontend: Open dashboard
+Frontend -> Controller: GET /statistics
+
+Controller -> Service: getPhotoStatistics()
+
+== Data ophalen ==
+Service -> Repository: findAll()
+Repository -> PostgreSQL: SELECT * FROM photos
+PostgreSQL --> Repository: List<Photo>
+Repository --> Service: allPhotos
+
+alt Geen foto's
+    Service -> Service: createEmptyStatistics()
+    Service --> Controller: Lege statistieken
+else Foto's gevonden
+
+    == Berekeningen ==
+    Service -> Service: Camera usage (groeperen)
+    Service -> Service: Lens usage (groeperen)
+    Service -> Service: ISO/Aperture distributie
+    Service -> Service: GPS analyse
+    Service -> Service: Upload trends
+    Service -> Service: Genereer inzichten
+    Service -> Service: Genereer aanbevelingen
+
+    Service --> Controller: PhotoStatisticsDto
+end
+
+Controller --> Frontend: 200 OK + JSON
+Frontend --> User: Dashboard met grafieken
+
+@enduml
+@startuml Photo Upload - Simplified
+!theme plain
+skinparam BoxPadding 5
+skinparam ParticipantPadding 10
+
+actor User
+participant Frontend
+participant Controller
+participant Service
+participant Repository
+database PostgreSQL
+database "File System" as FS
+
+User -> Frontend: Upload foto
+Frontend -> Controller: POST /photos/upload
+
+== Validatie ==
+Controller -> Controller: Check bestand
+alt Ongeldig
+    Controller --> Frontend: 400 Bad Request
+    Frontend --> User: Foutmelding
+else Geldig
+    Controller -> Service: savePhoto(file)
+
+    == Metadata & Processing ==
+    Service -> Service: Extract EXIF metadata
+    Service -> Service: RAW detectie
+
+    alt RAW format
+        Service -> Service: Probeer preview (3x)
+        alt Mislukt
+            Service -> Service: Placeholder image
+        end
+    end
+
+    Service -> Service: Resize & compress\n(max 2560px, JPEG 92%)
+
+    == Opslag ==
+    Service -> FS: Opslaan (UUID naam)
+    Service -> Repository: Save metadata
+    Repository -> PostgreSQL: INSERT photo
+
+    Service --> Controller: Success
+    Controller --> Frontend: 200 OK + details
+    Frontend --> User: Foto in galerij
+end
+
+@enduml
+

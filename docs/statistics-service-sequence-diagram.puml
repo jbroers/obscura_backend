@@ -1,0 +1,132 @@
+@startuml Statistics Service Flow
+!theme plain
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+skinparam BoxPadding 8
+
+title Photo Statistics Service - Current Implementation
+
+actor User
+participant "Frontend" as FE
+participant "StatisticsController" as SC
+participant "StatisticsService" as SS
+database "PhotoRepository" as PR
+
+== Statistics Request ==
+User -> FE: Navigate to Dashboard\nGET /statistics
+activate FE
+FE -> SC: GET /statistics
+activate SC
+SC -> SC: logger.info("Fetching photo statistics")
+
+SC -> SS: getPhotoStatistics()
+activate SS
+SS -> SS: logger.info("Calculating photo statistics")
+
+== Data Retrieval ==
+SS -> PR: findAll()
+activate PR
+PR --> SS: List<Photo> allPhotos
+deactivate PR
+
+alt No photos in database
+    SS -> SS: createEmptyStatistics()
+    note right
+        Returns default DTO with:
+        - totalPhotos = 0
+        - empty maps
+        - insights: "Nog geen foto's geüpload"
+        - recommendations: "Upload je eerste foto..."
+    end note
+    SS --> SC: PhotoStatisticsDto (empty)
+    SC -> SC: logger.info("Successfully calculated statistics for 0 photos")
+    SC --> FE: 200 OK\n{PhotoStatisticsDto}
+    FE --> User: Display empty state
+    deactivate SS
+    deactivate SC
+    deactivate FE
+    return
+end
+
+== In-Memory Statistics Calculation ==
+group Camera & Equipment Statistics
+    SS -> SS: countRawPhotos(allPhotos)
+    SS -> SS: countJpegPhotos(allPhotos)
+    SS -> SS: calculateTotalStorage(allPhotos)
+    SS -> SS: calculateCameraUsage(allPhotos)\n→ Map<String, Integer>
+    SS -> SS: findMostUsedCamera(allPhotos)
+    SS -> SS: calculateLensUsage(allPhotos)\n→ Map<String, Integer>
+    SS -> SS: findMostUsedLens(allPhotos)
+end
+
+group EXIF Metadata Statistics
+    SS -> SS: calculateApertureDistribution(allPhotos)\n→ Map<String, Integer>
+    SS -> SS: findMostUsedAperture(allPhotos)
+    SS -> SS: calculateIsoDistribution(allPhotos)\n→ Map<String, Integer>
+    SS -> SS: findMostUsedIso(allPhotos)
+    SS -> SS: calculateFocalLengthDistribution(allPhotos)\n→ Map<String, Integer>
+    SS -> SS: findMostUsedFocalLength(allPhotos)
+end
+
+group GPS & Location Statistics
+    SS -> SS: countPhotosWithGps(allPhotos)
+    SS -> SS: countPhotosWithoutGps(allPhotos)
+    SS -> SS: calculateAverageLatitude(allPhotos)
+    SS -> SS: calculateAverageLongitude(allPhotos)
+end
+
+group Time-Based Statistics
+    SS -> SS: calculateUploadPeriod(allPhotos)
+    SS -> SS: countPhotosLastWeek(allPhotos)
+    SS -> SS: countPhotosLastMonth(allPhotos)
+    SS -> SS: findMostActiveDay(allPhotos)\n→ DayOfWeek → Dutch translation
+end
+
+group AI-Generated Insights
+    SS -> SS: generateInsights(allPhotos)
+    note right
+        Analyzes patterns:
+        - Camera loyalty/diversity
+        - Aperture preferences (bokeh/landscape)
+        - ISO patterns (low-light detection)
+        - GPS usage percentage
+        - RAW vs JPEG ratio
+        - Upload frequency trends
+    end note
+
+    SS -> SS: generateRecommendations(allPhotos)
+    note right
+        Provides actionable advice:
+        - Lens diversity suggestions
+        - GPS enablement
+        - RAW format adoption
+        - ISO optimization
+        - Creative experiments
+        - Storage management
+    end note
+end
+
+== Build and Return Response ==
+SS -> SS: PhotoStatisticsDto.builder()\n.totalPhotos()\n.cameraUsage()\n.insights()\n.recommendations()\n...build()
+
+SS -> SS: logger.info("Statistics calculated: {} photos, {} cameras, {} lenses")
+SS --> SC: PhotoStatisticsDto
+deactivate SS
+
+SC -> SC: logger.info("Successfully calculated statistics for {} photos")
+SC --> FE: 200 OK\n{PhotoStatisticsDto}
+deactivate SC
+
+FE --> User: Display dashboard with:\n- Equipment stats\n- EXIF distributions\n- GPS heatmap\n- Insights & recommendations
+deactivate FE
+
+== Error Handling ==
+alt Exception during calculation
+    SS -> SS: Exception thrown
+    SS --> SC: throw Exception
+    SC -> SC: logger.error("Error calculating statistics: {}", e.getMessage())
+    SC --> FE: 500 Internal Server Error\n{"error": "Failed to calculate statistics",\n "message": "<details>"}
+    FE --> User: Display error message
+end
+
+@enduml

@@ -1,0 +1,71 @@
+package com.example.obscura_backend.model;
+
+import jakarta.persistence.*;
+import lombok.AllArgsConstructor;
+import lombok.Builder;
+import lombok.Data;
+import lombok.NoArgsConstructor;
+
+import java.time.LocalDateTime;
+
+@Entity
+@Table(name = "photos")
+@Data
+@Builder
+@NoArgsConstructor
+@AllArgsConstructor
+public class Photo {
+
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+
+    @Column(length = 512)
+    private String fileName;
+
+    @Column(length = 1024)
+    private String filePath;
+
+    @Column(length = 2048)
+    private String fileUrl;
+
+    private String contentType;
+    private Long fileSize;
+    private LocalDateTime uploadedAt;
+    private Boolean isRaw;
+
+    @Column(unique = true, length = 64, columnDefinition = "VARCHAR(64)")
+    private String fileHash;
+
+    @Column(length = 255, columnDefinition = "VARCHAR(255)")
+    private String cameraMake;
+
+    @Column(length = 255, columnDefinition = "VARCHAR(255)")
+    private String cameraModel;
+
+    @Column(length = 512, columnDefinition = "VARCHAR(512)")
+    private String lensModel;
+
+    private Integer iso;
+    private String aperture;
+    private String shutterSpeed;
+    private String focalLength;
+
+    @Column(length = 512)
+    private String exposureCompensation;
+
+    @Column(length = 512)
+    private String whiteBalance;
+
+    @Column(length = 512)
+    private String meteringMode;
+
+    @Column(length = 512)
+    private String flashMode;
+
+    private String resolution;
+    private LocalDateTime dateTaken;
+    private String orientation;
+    private String gpsLatitude;
+    private String gpsLongitude;
+}
