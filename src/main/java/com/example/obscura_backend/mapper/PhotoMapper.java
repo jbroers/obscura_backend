@@ -38,6 +38,7 @@ public class PhotoMapper {
         String url = photo.getFileUrl() != null ? photo.getFileUrl() : generatePhotoUrl(photo.getFilePath());
         dto.setUrl(url);
 
+        dto.setFileSize(photo.getFileSize());
         dto.setAperture(photo.getAperture());
         dto.setShutterSpeed(photo.getShutterSpeed());
         dto.setIso(photo.getIso() != null ? photo.getIso().toString() : null);

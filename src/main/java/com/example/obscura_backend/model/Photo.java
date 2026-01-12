@@ -34,10 +34,16 @@ public class Photo {
     private LocalDateTime uploadedAt;
     private Boolean isRaw;
 
+    @Column(unique = true, length = 64, columnDefinition = "VARCHAR(64)")
+    private String fileHash;
+
+    @Column(length = 255, columnDefinition = "VARCHAR(255)")
     private String cameraMake;
+
+    @Column(length = 255, columnDefinition = "VARCHAR(255)")
     private String cameraModel;
 
-    @Column(length = 512)
+    @Column(length = 512, columnDefinition = "VARCHAR(512)")
     private String lensModel;
 
     private Integer iso;

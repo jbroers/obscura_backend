@@ -5,7 +5,9 @@ import com.drew.imaging.ImageProcessingException;
 import com.drew.metadata.Metadata;
 import com.example.obscura_backend.model.Photo;
 import com.example.obscura_backend.repository.PhotoRepository;
-import jakarta.annotation.PostConstruct;
+import com.example.obscura_backend.dto.BatchUploadResultDto;
+import com.example.obscura_backend.dto.PhotoResponseDto;
+import com.example.obscura_backend.mapper.PhotoMapper;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
@@ -13,11 +15,14 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.*;
-import java.nio.file.*;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.time.LocalDateTime;
 import java.util.UUID;
 import java.util.Arrays;
 import java.util.List;
+import java.util.ArrayList;
+import java.util.concurrent.*;
 
 import org.apache.tika.Tika;
 import javax.imageio.ImageIO;
@@ -26,6 +31,7 @@ import net.coobird.thumbnailator.Thumbnails;
 import com.example.obscura_backend.service.raw.RawImageExtractionService;
 import com.example.obscura_backend.service.exif.ExifExtractionService;
 import com.example.obscura_backend.service.exif.CR3Parser;
+import com.drew.metadata.exif.ExifIFD0Directory;
 
 @Service
 public class PhotoService {
@@ -36,19 +42,104 @@ public class PhotoService {
     private final RawImageExtractionService rawImageExtractionService;
     private final ExifExtractionService exifExtractionService;
     private final MinioService minioService;
+    private final PhotoMapper photoMapper;
+    private final ExecutorService executorService;
 
     private static final List<String> RAW_EXTENSIONS = Arrays.asList(
             "cr2", "cr3", "nef", "arw", "dng", "orf", "raf", "rw2", "pef", "srw", "craw"
     );
 
+    @Value("${batch.upload.max-concurrent:4}")
+    private int maxConcurrent;
+
+    @Value("${batch.upload.max-total-size:1000000000}")
+    private long maxTotalSize;
+
     public PhotoService(PhotoRepository photoRepository,
                         RawImageExtractionService rawImageExtractionService,
                         ExifExtractionService exifExtractionService,
-                        MinioService minioService) {
+                        MinioService minioService,
+                        PhotoMapper photoMapper) {
         this.photoRepository = photoRepository;
         this.rawImageExtractionService = rawImageExtractionService;
         this.exifExtractionService = exifExtractionService;
         this.minioService = minioService;
+        this.photoMapper = photoMapper;
+        this.executorService = Executors.newFixedThreadPool(Runtime.getRuntime().availableProcessors());
+    }
+
+    public BatchUploadResultDto savePhotosBatch(List<MultipartFile> files) {
+        if (files == null || files.isEmpty()) {
+            throw new IllegalArgumentException("No files uploaded");
+        }
+
+        logger.info("Starting batch upload of {} file(s)", files.size());
+
+        long totalSize = files.stream().mapToLong(MultipartFile::getSize).sum();
+        if (totalSize > maxTotalSize) {
+            throw new IllegalArgumentException(
+                String.format("Total batch size (%d MB) exceeds maximum allowed (%d MB)",
+                    totalSize / (1024 * 1024), maxTotalSize / (1024 * 1024))
+            );
+        }
+
+        List<PhotoResponseDto> successful = new ArrayList<>();
+        List<BatchUploadResultDto.FileErrorDto> failed = new ArrayList<>();
+        List<String> duplicates = new ArrayList<>();
+
+        List<CompletableFuture<Void>> futures = new ArrayList<>();
+
+        for (MultipartFile file : files) {
+            CompletableFuture<Void> future = CompletableFuture.runAsync(() -> {
+                try {
+                    String fileHash = calculateFileHash(file);
+
+                    if (photoRepository.existsByFileHash(fileHash)) {
+                        synchronized (duplicates) {
+                            duplicates.add(file.getOriginalFilename());
+                            logger.warn("Duplicate file detected: {}", file.getOriginalFilename());
+                        }
+                        return;
+                    }
+
+                    Photo photo = savePhotoWithHash(file, fileHash);
+                    PhotoResponseDto dto = photoMapper.toDto(photo);
+
+                    synchronized (successful) {
+                        successful.add(dto);
+                    }
+
+                    logger.debug("Successfully processed: {}", file.getOriginalFilename());
+
+                } catch (Exception e) {
+                    synchronized (failed) {
+                        failed.add(new BatchUploadResultDto.FileErrorDto(
+                            file.getOriginalFilename(),
+                            e.getMessage(),
+                            file.getSize()
+                        ));
+                    }
+                    logger.error("Failed to process {}: {}", file.getOriginalFilename(), e.getMessage());
+                }
+            }, executorService);
+
+            futures.add(future);
+        }
+
+        CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
+
+        logger.info("Batch upload completed: {} successful, {} failed, {} duplicates",
+            successful.size(), failed.size(), duplicates.size());
+
+        return new BatchUploadResultDto(
+            files.size(),
+            successful.size(),
+            failed.size(),
+            duplicates.size(),
+            successful,
+            failed,
+            duplicates
+        );
     }
 
     public List<Photo> savePhotos(List<MultipartFile> files) throws IOException {
@@ -77,6 +168,30 @@ public class PhotoService {
         return savedPhotos;
     }
 
+    private String calculateFileHash(MultipartFile file) throws IOException {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            byte[] fileBytes = file.getBytes();
+            byte[] hashBytes = digest.digest(fileBytes);
+
+            StringBuilder hexString = new StringBuilder();
+            for (byte b : hashBytes) {
+                String hex = Integer.toHexString(0xff & b);
+                if (hex.length() == 1) hexString.append('0');
+                hexString.append(hex);
+            }
+            return hexString.toString();
+        } catch (NoSuchAlgorithmException e) {
+            throw new RuntimeException("SHA-256 algorithm not available", e);
+        }
+    }
+
+    private Photo savePhotoWithHash(MultipartFile file, String fileHash) throws IOException {
+        Photo photo = savePhoto(file);
+        photo.setFileHash(fileHash);
+        return photoRepository.save(photo);
+    }
+
     public Photo savePhoto(MultipartFile file) throws IOException {
         if (file == null || file.isEmpty()) {
             throw new IllegalArgumentException("No file uploaded");
@@ -95,6 +210,7 @@ public class PhotoService {
         } catch (Exception e) {
             logger.debug("Top-level metadata read failed: {}", e.getMessage());
         }
+
 
         Metadata metadata = topMetadata;
         Metadata embeddedMetadata = null;
@@ -157,8 +273,15 @@ public class PhotoService {
             logger.debug("exiftool fallback failed: {}", e.getMessage());
         }
 
-
         BufferedImage image = previewFromRaw != null ? previewFromRaw : loadImage(file, isRaw);
+
+        Integer orientation = null;
+        if (topMetadata != null) {
+            orientation = extractOrientationFromMetadata(topMetadata);
+        }
+        if (orientation == null && metadata != null && metadata != topMetadata) {
+            orientation = extractOrientationFromMetadata(metadata);
+        }
 
         String filePath = compressAndSave(image, originalFileName);
 
@@ -172,6 +295,10 @@ public class PhotoService {
         }
 
         Photo photo = createPhotoEntity(file, filePath, topMetadata, embeddedMetadata != null ? embeddedMetadata : metadata, isRaw, exiftoolMap, cr3map);
+
+        if (orientation != null) {
+            photo.setOrientation(String.valueOf(orientation));
+        }
 
         return photoRepository.save(photo);
     }
@@ -230,6 +357,66 @@ public class PhotoService {
         }
     }
 
+    private Integer extractOrientationFromMetadata(Metadata metadata) {
+        if (metadata == null) return null;
+
+        try {
+            ExifIFD0Directory ifd0 = metadata.getFirstDirectoryOfType(ExifIFD0Directory.class);
+            if (ifd0 != null && ifd0.containsTag(ExifIFD0Directory.TAG_ORIENTATION)) {
+                return ifd0.getInt(ExifIFD0Directory.TAG_ORIENTATION);
+            }
+
+            com.drew.metadata.exif.ExifSubIFDDirectory subIfd = metadata.getFirstDirectoryOfType(com.drew.metadata.exif.ExifSubIFDDirectory.class);
+            if (subIfd != null && subIfd.containsTag(com.drew.metadata.exif.ExifSubIFDDirectory.TAG_ORIENTATION)) {
+                return subIfd.getInt(com.drew.metadata.exif.ExifSubIFDDirectory.TAG_ORIENTATION);
+            }
+
+            for (com.drew.metadata.Directory directory : metadata.getDirectories()) {
+                for (com.drew.metadata.Tag tag : directory.getTags()) {
+                    if (tag.getTagName() != null && tag.getTagName().equalsIgnoreCase("Orientation")) {
+                        String desc = tag.getDescription();
+                        if (desc != null) {
+                            if (desc.contains("90") && desc.toUpperCase().contains("CW") && !desc.toUpperCase().contains("CCW")) return 6;
+                            if (desc.contains("270") || (desc.contains("90") && desc.toUpperCase().contains("CCW"))) return 8;
+                            if (desc.contains("180")) return 3;
+                            if (desc.toLowerCase().contains("normal") || desc.toLowerCase().contains("horizontal")) return 1;
+                        }
+                    }
+                }
+            }
+
+            return null;
+
+        } catch (Exception e) {
+            logger.debug("Error reading orientation from metadata: {}", e.getMessage());
+            return null;
+        }
+    }
+
+
+    private boolean photoMetadataIncomplete(Metadata metadata) {
+        if (metadata == null) return true;
+        boolean hasDate = false;
+        boolean hasCameraInfo = false;
+        boolean hasLocation = false;
+
+        for (com.drew.metadata.Directory dir : metadata.getDirectories()) {
+            for (com.drew.metadata.Tag tag : dir.getTags()) {
+                String name = tag.getTagName();
+                if (name != null && name.equalsIgnoreCase("DateTimeOriginal")) {
+                    hasDate = true;
+                }
+                if (name != null && (name.equalsIgnoreCase("Make") || name.equalsIgnoreCase("Model"))) {
+                    hasCameraInfo = true;
+                }
+                if (name != null && (name.equalsIgnoreCase("GPSLatitude") || name.equalsIgnoreCase("GPSLongitude"))) {
+                    hasLocation = true;
+                }
+            }
+        }
+
+        return !hasDate || !hasCameraInfo || !hasLocation;
+    }
 
     private String compressAndSave(BufferedImage image, String originalFileName) throws IOException {
         ByteArrayOutputStream baos = new ByteArrayOutputStream();
@@ -251,21 +438,14 @@ public class PhotoService {
                 .outputQuality(quality)
                 .toOutputStream(baos);
 
-        String baseFileName = sanitizeFileName(originalFileName);
-        String extension = getFileExtension(baseFileName);
-        String nameWithoutExt = baseFileName.substring(0, baseFileName.length() - extension.length() - 1);
         String uniqueFileName = UUID.randomUUID() + ".jpg";
-
         byte[] compressedBytes = baos.toByteArray();
 
-        String minioFileName = minioService.uploadBytes(compressedBytes, uniqueFileName, "image/jpeg");
-
-
-        return minioFileName;
+        return minioService.uploadBytes(compressedBytes, uniqueFileName, "image/jpeg");
     }
 
     private Photo createPhotoEntity(MultipartFile file, String filePath, Metadata primaryMetadata, Metadata secondaryMetadata,
-                                    boolean isRaw, java.util.Map<String, String> exiftoolMap, java.util.Map<String, String> cr3map) throws IOException {
+                                    boolean isRaw, java.util.Map<String, String> exiftoolMap, java.util.Map<String, String> cr3map) {
         Photo photo = new Photo();
         photo.setFileName(file.getOriginalFilename());
         photo.setFilePath(filePath);
@@ -304,6 +484,16 @@ public class PhotoService {
 
     public List<Photo> getAllPhotos() {
         return photoRepository.findAll();
+    }
+
+    public Photo getPhotoById(Long photoId) {
+        return photoRepository.findById(photoId)
+                .orElseThrow(() -> new RuntimeException("Photo not found with id: " + photoId));
+    }
+
+    public List<Photo> searchPhotos(String make, String model, String lens, Boolean isRaw,
+                                     LocalDateTime startDate, LocalDateTime endDate) {
+        return photoRepository.searchPhotos(make, model, lens, isRaw, startDate, endDate);
     }
 
     public void deletePhoto(Long photoId) {
@@ -350,33 +540,5 @@ public class PhotoService {
             count += dir.getTags().size();
         }
         return count;
-    }
-
-    private boolean photoMetadataIncomplete(Metadata metadata) {
-        if (metadata == null) return true;
-        boolean hasDate = false;
-        boolean hasCameraInfo = false;
-        boolean hasLocation = false;
-
-        for (com.drew.metadata.Directory dir : metadata.getDirectories()) {
-            for (com.drew.metadata.Tag tag : dir.getTags()) {
-                String name = tag.getTagName();
-                if (name != null && name.equalsIgnoreCase("DateTimeOriginal")) {
-                    hasDate = true;
-                }
-                if (name != null && (name.equalsIgnoreCase("Make") || name.equalsIgnoreCase("Model"))) {
-                    hasCameraInfo = true;
-                }
-                if (name != null && (name.equalsIgnoreCase("GPSLatitude") || name.equalsIgnoreCase("GPSLongitude"))) {
-                    hasLocation = true;
-                }
-            }
-        }
-
-        return !hasDate || !hasCameraInfo || !hasLocation;
-    }
-
-    private boolean notEmpty(String s) {
-        return s != null && !s.isBlank();
     }
 }
